@@ -1,6 +1,7 @@
 // https://github.com/WojciechMula/toys/blob/master/000helpers/linux-perf-events.h
 #pragma once
-#ifdef __linux__
+#if defined(__linux__) && !defined(NO_LINUX_EVENTS)
+#define WITH_LINUX_EVENTS
 
 #include <asm/unistd.h>       // for __NR_perf_event_open
 #include <linux/perf_event.h> // for perf event constants

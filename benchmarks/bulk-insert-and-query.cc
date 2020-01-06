@@ -43,9 +43,7 @@
 #include "random.h"
 #include "simd-block-fixed-fpp.h"
 #include "timing.h"
-#ifdef __linux__
 #include "linux-perf-events.h"
-#endif
 
 using namespace std;
 using namespace hashing;
@@ -770,7 +768,7 @@ Statistics FilterBenchmark(
 
   Table filter = FilterAPI<Table>::ConstructFromAddCount(add_count);
   Statistics result;
-#ifdef __linux__
+#ifdef WITH_LINUX_EVENTS
   vector<int> evts;
   evts.push_back(PERF_COUNT_HW_CPU_CYCLES);
   evts.push_back(PERF_COUNT_HW_INSTRUCTIONS);
@@ -801,7 +799,7 @@ Statistics FilterBenchmark(
   }
   auto time = NowNanos() - start_time;
   std::cout << "\r             \r" << std::flush;
-#ifdef __linux__
+#ifdef WITH_LINUX_EVENTS
   unified.end(results);
   printf("add    ");
   printf("cycles: %5.1f/key, instructions: (%5.1f/key, %4.2f/cycle) cache misses: %5.2f/key branch misses: %4.2f/key\n",
@@ -829,7 +827,7 @@ Statistics FilterBenchmark(
     const auto to_lookup_mixed =  t.to_lookup_mixed ;
     size_t true_match = t.true_match ;
 
-#ifdef __linux__
+#ifdef WITH_LINUX_EVENTS
     unified.start();
 #else
     std::cout << "-" << std::flush;
@@ -840,7 +838,7 @@ Statistics FilterBenchmark(
       found_count += FilterAPI<Table>::Contain(v, &filter);
     }
     const auto lookup_time = NowNanos() - start_time;
-#ifdef __linux__
+#ifdef WITH_LINUX_EVENTS
     unified.end(results);
     printf("%3.2f%%  ",found_probability);
     printf("cycles: %5.1f/key, instructions: (%5.1f/key, %4.2f/cycle) cache misses: %5.2f/key branch misses: %4.2f/key\n",
@@ -878,7 +876,7 @@ Statistics FilterBenchmark(
   result.nanos_per_remove = 0;
   if (remove) {
     std::cout << "1-by-1 remove" << std::flush;
-#ifdef __linux__
+#ifdef WITH_LINUX_EVENTS
     unified.start();
 #else
     std::cout << "-" << std::flush;
@@ -889,7 +887,7 @@ Statistics FilterBenchmark(
     }
     time = NowNanos() - start_time;
     result.nanos_per_remove = static_cast<double>(time) / add_count;
-#ifdef __linux__
+#ifdef WITH_LINUX_EVENTS
     unified.end(results);
     printf("remove ");
     printf("cycles: %5.1f/key, instructions: (%5.1f/key, %4.2f/cycle) cache misses: %5.2f/key branch misses: %4.2f/key\n",
@@ -903,7 +901,7 @@ Statistics FilterBenchmark(
 #endif
   }
 
-#ifndef __linux__
+#ifndef WITH_LINUX_EVENTS
   std::cout << "\r             \r" << std::flush;
 #endif
 

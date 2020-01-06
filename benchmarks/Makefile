@@ -17,6 +17,9 @@ else
 	CXXFLAGS += -march=native
 endif
 endif
+ifneq ($(NO_LINUX_EVENTS),)
+	CXXFLAGS += -DNO_LINUX_EVENTS=1
+endif
 
 LDFLAGS = -Wall
 
