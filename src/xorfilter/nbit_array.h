@@ -130,15 +130,24 @@ public:
 
 template <typename ItemType, size_t bitsPerEntry, uint32_t bitMask = (1 << bitsPerEntry) - 1>
 class NBitArray {
-    size_t byteCount;
-    uint8_t* data;
 public:
+    size_t entryCount;
+    size_t byteCount;
+    size_t byteCountFloor;
+    uint8_t* data;
+    uint8_t* data_raw;
     NBitArray(size_t size) {
+        entryCount = size;
         byteCount = (size * bitsPerEntry + 63 + 128) / 64 * 64 / 8;
-        data = new uint8_t[byteCount]();
+        byteCountFloor = size * bitsPerEntry / 8;
+        data_raw = new uint8_t[byteCount]();
+        data = data_raw + 3;
     }
     ~NBitArray() {
-        delete[] data;
+        delete[] data_raw;
+    }
+    inline size_t getBitsPerEntry() {
+        return bitsPerEntry;
     }
     inline ItemType get(size_t index) {
         size_t bitPos = index * bitsPerEntry;
@@ -146,6 +155,21 @@ public:
         uint32_t word = *((uint32_t*) (data + firstBytePos));
         return (ItemType) ((word >> (bitPos & 7)) & bitMask);
     }
+    /*
+    inline ItemType reduce_get(uint32_t index_hash) {
+        size_t approx_byte = (uint32_t) (((uint64_t) index_hash * byteCountFloor) >> 32) + 1;
+        uint64_t word = *((uint64_t*) (data_raw + approx_byte));
+        size_t exact_bit = bitsPerEntry * (size_t)(((uint64_t) index_hash * entryCount) >> 32);
+        size_t shift = (exact_bit + 32 - (approx_byte * 8));
+        assert(shift <= 64 - bitsPerEntry);
+        ItemType rv = mask((ItemType)(word >> shift));
+#ifndef NDEBUG
+        ItemType alt = get((size_t)(((uint64_t) index_hash * entryCount) >> 32));
+#endif
+        assert(rv == alt);
+        return rv;
+    }
+    */
     void bulkSet(uint16_t* source, size_t length) {
         for(size_t i = 0; i < length; i++) {
             set(i, source[i]);

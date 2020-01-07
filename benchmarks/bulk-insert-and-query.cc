@@ -31,6 +31,7 @@
 #include "xorfilter_10_666bit.h"
 #include "xorfilter_2.h"
 #include "xorfilter_2n.h"
+#include "xorfilter_3.h"
 #include "xorfilter_plus.h"
 #include "xorfilter_singleheader.h"
 #include "bloom.h"
@@ -51,6 +52,7 @@ using namespace cuckoofilter;
 using namespace xorfilter;
 using namespace xorfilter2;
 using namespace xorfilter2n;
+using namespace xorfilter3;
 using namespace xorfilter_plus;
 using namespace bloomfilter;
 using namespace counting_bloomfilter;
@@ -463,6 +465,24 @@ struct FilterAPI<XorFilter<ItemType, FingerprintType, HashFamily>> {
 template <typename ItemType, typename FingerprintType, typename FingerprintStorageType, typename HashFamily>
 struct FilterAPI<XorFilter2<ItemType, FingerprintType, FingerprintStorageType, HashFamily>> {
   using Table = XorFilter2<ItemType, FingerprintType, FingerprintStorageType, HashFamily>;
+  static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
+  static void Add(uint64_t key, Table* table) {
+    throw std::runtime_error("Unsupported");
+  }
+  static void AddAll(const vector<ItemType> keys, const size_t start, const size_t end, Table* table) {
+    table->AddAll(keys, start, end);
+  }
+  static void Remove(uint64_t key, Table * table) {
+    throw std::runtime_error("Unsupported");
+  }
+  CONTAIN_ATTRIBUTES static bool Contain(uint64_t key, const Table * table) {
+    return (0 == table->Contain(key));
+  }
+};
+
+template <typename ItemType, typename FingerprintType, typename FingerprintStorageType, typename HashFamily>
+struct FilterAPI<XorFilter3<ItemType, FingerprintType, FingerprintStorageType, HashFamily>> {
+  using Table = XorFilter3<ItemType, FingerprintType, FingerprintStorageType, HashFamily>;
   static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
   static void Add(uint64_t key, Table* table) {
     throw std::runtime_error("Unsupported");
@@ -938,7 +958,7 @@ int main(int argc, char * argv[]) {
     {0, "Xor8"}, {1, "Xor12"}, {2, "Xor16"},
     {3, "Xor+8"}, {4, "Xor+16"},
     {5, "Xor10"}, {6, "Xor10.666"},
-    {7, "Xor10 (NBitArray)"}, {8, "Xor14 (NBitArray)"}, {9, "Xor8-2^n"},
+    {7, "Xor10 (NBitArray)"}, {8, "Xor14 (NBitArray)"}, {9, "Xor14 (NBit+)"},
     // Cuckooo
     {10,"Cuckoo8"}, {11,"Cuckoo12"}, {12,"Cuckoo16"},
     {13,"CuckooSemiSort13"},
@@ -1198,7 +1218,7 @@ int main(int argc, char * argv[]) {
   a = 9;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
-          XorFilter2n<uint64_t, uint8_t, UIntArray<uint8_t>, SimpleMixSplit>>(
+          XorFilter3<uint64_t, uint16_t, NBitArray<uint16_t, 14>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
