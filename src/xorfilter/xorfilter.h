@@ -5,6 +5,10 @@
 #include <algorithm>
 #include "hashutil.h"
 
+#ifdef DUMP
+#include <fstream>
+#endif
+
 using namespace std;
 using namespace hashing;
 
@@ -290,6 +294,12 @@ Status XorFilter<ItemType, FingerprintType, HashFamily>::AddAll(
     delete [] reverseOrder;
     delete [] reverseH;
 
+#ifdef DUMP
+    {
+        std::ofstream outfile ("xor8.dat",std::ofstream::binary);
+        outfile.write((char*)fingerprints, m);
+    }
+#endif
     return Ok;
 }
 
