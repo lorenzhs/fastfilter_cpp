@@ -49,11 +49,14 @@ class XorFilter {
   size_t arrayLength;
   size_t blockLength;
   FingerprintType *fingerprints;
+  static constexpr FingerprintType fp_range = FingerprintType{0} - FingerprintType{1};
+  // >= the number of fingerprints we might add together
+  static constexpr FingerprintType magic_sum = FingerprintType{4};
 
   HashFamily* hasher;
 
   inline FingerprintType fingerprint(const uint64_t hash) const {
-    return (FingerprintType) hash ^ (hash >> 32);
+    return (FingerprintType) reduce(hash ^ (hash >> 32), fp_range);
   }
 
   explicit XorFilter(const size_t size) {
@@ -62,7 +65,7 @@ class XorFilter {
     this->arrayLength = 32 + 1.23 * size;
     this->blockLength = arrayLength / 3;
     fingerprints = new FingerprintType[arrayLength]();
-    std::fill_n(fingerprints, arrayLength, 0);
+    std::fill_n(fingerprints, arrayLength, fp_range);
   }
 
   ~XorFilter() {
@@ -270,6 +273,13 @@ Status XorFilter<ItemType, FingerprintType, HashFamily>::AddAll(
     }
 
     for (int i = reverseOrderPos - 1; i >= 0; i--) {
+        for (int hi = 0; hi < 3; hi++) {
+            size_t h = getHashFromHash(reverseOrder[i], hi, blockLength);
+            fingerprints[h] = 0;
+        }
+    }
+
+    for (int i = reverseOrderPos - 1; i >= 0; i--) {
         // the hash of the key we insert next
         uint64_t hash = reverseOrder[i];
         int found = reverseH[i];
@@ -277,18 +287,16 @@ Status XorFilter<ItemType, FingerprintType, HashFamily>::AddAll(
         int change = -1;
         // we set table[change] to the fingerprint of the key,
         // unless the other two entries are already occupied
-        FingerprintType xor2 = fingerprint(hash);
+        uint32_t sum = fp_range - fingerprint(hash);
         for (int hi = 0; hi < 3; hi++) {
             size_t h = getHashFromHash(hash, hi, blockLength);
             if (found == hi) {
                 change = h;
             } else {
-                // this is different from BDZ: using xor to calculate the
-                // fingerprint
-                xor2 ^= fingerprints[h];
+                sum += fp_range - fingerprints[h];
             }
         }
-        fingerprints[change] = xor2;
+        fingerprints[change] = (sum + magic_sum) % fp_range;
     }
     delete [] t2vals;
     delete [] reverseOrder;
@@ -308,15 +316,18 @@ template <typename ItemType, typename FingerprintType,
 Status XorFilter<ItemType, FingerprintType, HashFamily>::Contain(
     const ItemType &key) const {
     uint64_t hash = (*hasher)(key);
-    FingerprintType f = fingerprint(hash);
     uint32_t r0 = (uint32_t) hash;
     uint32_t r1 = (uint32_t) rotl64(hash, 21);
     uint32_t r2 = (uint32_t) rotl64(hash, 42);
     uint32_t h0 = reduce(r0, blockLength);
     uint32_t h1 = reduce(r1, blockLength) + blockLength;
     uint32_t h2 = reduce(r2, blockLength) + 2 * blockLength;
-    f ^= fingerprints[h0] ^ fingerprints[h1] ^ fingerprints[h2];
-    return f == 0 ? Ok : NotFound;
+    FingerprintType f0 = fingerprints[h0];
+    FingerprintType f1 = fingerprints[h1];
+    FingerprintType f2 = fingerprints[h2];
+    uint32_t sum = (uint32_t)fingerprint(hash) + f0 + f1 + f2;
+    sum += sum >> (sizeof(FingerprintType) * 8);
+    return ((FingerprintType)sum == magic_sum) & (f0 != fp_range) & (f1 != fp_range) & (f2 != fp_range) ? Ok : NotFound;
 }
 
 template <typename ItemType, typename FingerprintType,

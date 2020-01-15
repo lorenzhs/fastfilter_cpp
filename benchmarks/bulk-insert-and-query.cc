@@ -935,7 +935,7 @@ void parse_comma_separated(char * c, std::set<int> & answer ) {
 int main(int argc, char * argv[]) {
   std::map<int,std::string> names = {
     // Xor
-    {0, "Xor8"}, {1, "Xor12"}, {2, "Xor16"},
+    {0, "Xor$8"}, {1, "Xor12"}, {2, "Xor$16"},
     {3, "Xor+8"}, {4, "Xor+16"},
     {5, "Xor10"}, {6, "Xor10.666"},
     {7, "Xor10 (NBitArray)"}, {8, "Xor14 (NBitArray)"}, {9, "Xor8-2^n"},
