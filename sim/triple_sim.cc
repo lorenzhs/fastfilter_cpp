@@ -30,14 +30,21 @@ int main(int argc, char *argv[]) {
 
     size_t nkeys = (size_t)std::atoi(argv[1]);
     size_t len = (size_t)std::atoi(argv[2]);
+    size_t vlen = len;
+    if (argc > 3) {
+        vlen = (size_t)std::atoi(argv[3]);
+    }
 
     std::vector<uint64_t> *arr = new std::vector<uint64_t>[len];
 
     for (size_t i = 0; i < nkeys; ++i) {
         uint64_t h = (uint64_t)rand();
-        arr[r0(h, len)].push_back(h);
-        arr[r1(h, len)].push_back(h);
-        arr[r2(h, len)].push_back(h);
+        arr[r0(h, vlen)].push_back(h);
+        arr[r1(h, vlen)].push_back(h);
+        size_t h2 = r2(h, vlen);
+        if (h2 < len) {
+            arr[h2].push_back(h);
+        }
     }
 
     size_t initial_unmapped = 0;
@@ -68,8 +75,10 @@ int main(int argc, char *argv[]) {
                     later_mapped++;
                 }
                 uint64_t h = arr[i][0];
-                for (size_t j : {r0(h, len), r1(h, len), r2(h, len)}) {
-                    remove(arr[j], h);
+                for (size_t j : {r0(h, vlen), r1(h, vlen), r2(h, vlen)}) {
+                    if (j < len) {
+                        remove(arr[j], h);
+                    }
                 }
             } else {
                 more_todo = true;
@@ -82,8 +91,10 @@ int main(int argc, char *argv[]) {
                 if (count == 2) {
                     kicked++;
                     uint64_t h = arr[i][0];
-                    for (size_t j : {r0(h, len), r1(h, len), r2(h, len)}) {
-                        remove(arr[j], h);
+                    for (size_t j : {r0(h, vlen), r1(h, vlen), r2(h, vlen)}) {
+                        if (j < len) {
+                            remove(arr[j], h);
+                        }
                     }
                     good_kick = true;
                     break;
@@ -95,8 +106,10 @@ int main(int argc, char *argv[]) {
                     if (count > 1) {
                         kicked++;
                         uint64_t h = arr[i][0];
-                        for (size_t j : {r0(h, len), r1(h, len), r2(h, len)}) {
-                            remove(arr[j], h);
+                        for (size_t j : {r0(h, vlen), r1(h, vlen), r2(h, vlen)}) {
+                            if (j < len) {
+                                remove(arr[j], h);
+                            }
                         }
                         break;
                     }
