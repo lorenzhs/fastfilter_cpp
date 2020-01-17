@@ -11,13 +11,20 @@ inline size_t fastrange64(uint64_t hash, size_t range) {
   return static_cast<size_t>(wide >> 64);
 }
 
-size_t r0(uint64_t h, size_t len) {
+size_t r0_2(uint64_t h, size_t len) {
+    return fastrange64(h, len / 2);
+}
+size_t r1_2(uint64_t h, size_t len) {
+    return fastrange64((h >> 21) | (h << 43), len / 2) + len / 2;
+}
+
+size_t r0_3(uint64_t h, size_t len) {
     return fastrange64(h, len / 3);
 }
-size_t r1(uint64_t h, size_t len) {
+size_t r1_3(uint64_t h, size_t len) {
     return fastrange64((h >> 21) | (h << 43), len / 3) + len / 3;
 }
-size_t r2(uint64_t h, size_t len) {
+size_t r2_3(uint64_t h, size_t len) {
     return fastrange64((h >> 42) | (h << 22), len / 3) + 2 * (len / 3);
 }
 
@@ -30,20 +37,22 @@ int main(int argc, char *argv[]) {
 
     size_t nkeys = (size_t)std::atoi(argv[1]);
     size_t len = (size_t)std::atoi(argv[2]);
-    size_t vlen = len;
+    unsigned threshold = 0;
     if (argc > 3) {
-        vlen = (size_t)std::atoi(argv[3]);
+        threshold = (unsigned)std::atoi(argv[3]);
     }
 
     std::vector<uint64_t> *arr = new std::vector<uint64_t>[len];
 
     for (size_t i = 0; i < nkeys; ++i) {
         uint64_t h = (uint64_t)rand();
-        arr[r0(h, vlen)].push_back(h);
-        arr[r1(h, vlen)].push_back(h);
-        size_t h2 = r2(h, vlen);
-        if (h2 < len) {
-            arr[h2].push_back(h);
+        if (((h ^ (h >> 32)) & 255) < threshold) {
+            arr[r0_2(h, len)].push_back(h);
+            arr[r1_2(h, len)].push_back(h);
+        } else {
+            arr[r0_3(h, len)].push_back(h);
+            arr[r1_3(h, len)].push_back(h);
+            arr[r2_3(h, len)].push_back(h);
         }
     }
 
@@ -75,8 +84,12 @@ int main(int argc, char *argv[]) {
                     later_mapped++;
                 }
                 uint64_t h = arr[i][0];
-                for (size_t j : {r0(h, vlen), r1(h, vlen), r2(h, vlen)}) {
-                    if (j < len) {
+                if (((h ^ (h >> 32)) & 255) < threshold) {
+                    for (size_t j : {r0_2(h, len), r1_2(h, len)}) {
+                        remove(arr[j], h);
+                    }
+                } else {
+                    for (size_t j : {r0_3(h, len), r1_3(h, len), r2_3(h, len)}) {
                         remove(arr[j], h);
                     }
                 }
@@ -91,8 +104,12 @@ int main(int argc, char *argv[]) {
                 if (count == 2) {
                     kicked++;
                     uint64_t h = arr[i][0];
-                    for (size_t j : {r0(h, vlen), r1(h, vlen), r2(h, vlen)}) {
-                        if (j < len) {
+                    if (((h ^ (h >> 32)) & 255) < threshold) {
+                        for (size_t j : {r0_2(h, len), r1_2(h, len)}) {
+                            remove(arr[j], h);
+                        }
+                    } else {
+                        for (size_t j : {r0_3(h, len), r1_3(h, len), r2_3(h, len)}) {
                             remove(arr[j], h);
                         }
                     }
@@ -106,8 +123,12 @@ int main(int argc, char *argv[]) {
                     if (count > 1) {
                         kicked++;
                         uint64_t h = arr[i][0];
-                        for (size_t j : {r0(h, vlen), r1(h, vlen), r2(h, vlen)}) {
-                            if (j < len) {
+                        if (((h ^ (h >> 32)) & 255) < threshold) {
+                            for (size_t j : {r0_2(h, len), r1_2(h, len)}) {
+                                remove(arr[j], h);
+                            }
+                        } else {
+                            for (size_t j : {r0_3(h, len), r1_3(h, len), r2_3(h, len)}) {
                                 remove(arr[j], h);
                             }
                         }
