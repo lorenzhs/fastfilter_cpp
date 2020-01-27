@@ -11,6 +11,11 @@ inline size_t fastrange64(uint64_t hash, size_t range) {
   return static_cast<size_t>(wide >> 64);
 }
 
+inline uint32_t fastrange32(uint32_t hash, uint32_t range) {
+    uint64_t wide = uint64_t{hash} * range;
+    return static_cast<uint32_t>(wide >> 32);
+}
+
 size_t r0_2(uint64_t h, size_t len) {
     return fastrange64(h, len);
 }
@@ -19,13 +24,13 @@ size_t r1_2(uint64_t h, size_t len) {
 }
 
 size_t r0_3(uint64_t h, size_t len) {
-    return fastrange64(h, len);
+    return fastrange32(static_cast<uint32_t>(h), static_cast<uint32_t>(len));
 }
 size_t r1_3(uint64_t h, size_t len) {
-    return fastrange64((h >> 21) | (h << 43), len);
+    return fastrange32(static_cast<uint32_t>(h >> 32) ^ 0x9e3779b9, static_cast<uint32_t>(len));
 }
 size_t r2_3(uint64_t h, size_t len) {
-    return fastrange64((h >> 42) | (h << 22), len);
+    return fastrange32(static_cast<uint32_t>(h) ^ static_cast<uint32_t>(h >> 32), static_cast<uint32_t>(len));
 }
 
 void remove(std::vector<uint64_t>& v, uint64_t e) {
