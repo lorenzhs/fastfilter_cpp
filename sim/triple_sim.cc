@@ -12,20 +12,20 @@ inline size_t fastrange64(uint64_t hash, size_t range) {
 }
 
 size_t r0_2(uint64_t h, size_t len) {
-    return fastrange64(h, len / 2);
+    return fastrange64(h, len);
 }
 size_t r1_2(uint64_t h, size_t len) {
-    return fastrange64((h >> 21) | (h << 43), len / 2) + len / 2;
+    return fastrange64((h >> 21) | (h << 43), len);
 }
 
 size_t r0_3(uint64_t h, size_t len) {
-    return fastrange64(h, len / 3);
+    return fastrange64(h, len);
 }
 size_t r1_3(uint64_t h, size_t len) {
-    return fastrange64((h >> 21) | (h << 43), len / 3) + len / 3;
+    return fastrange64((h >> 21) | (h << 43), len);
 }
 size_t r2_3(uint64_t h, size_t len) {
-    return fastrange64((h >> 42) | (h << 22), len / 3) + 2 * (len / 3);
+    return fastrange64((h >> 42) | (h << 22), len);
 }
 
 void remove(std::vector<uint64_t>& v, uint64_t e) {
@@ -44,15 +44,28 @@ int main(int argc, char *argv[]) {
 
     std::vector<uint64_t> *arr = new std::vector<uint64_t>[len];
 
+    size_t collision2 = 0;
+    size_t collision3 = 0;
     for (size_t i = 0; i < nkeys; ++i) {
         uint64_t h = (uint64_t)rand();
         if (((h ^ (h >> 32)) & 255) < threshold) {
-            arr[r0_2(h, len)].push_back(h);
-            arr[r1_2(h, len)].push_back(h);
+            size_t h0 = r0_2(h, len);
+            arr[h0].push_back(h);
+            size_t h1 = r1_2(h, len);
+            arr[h1].push_back(h);
+            if (h0 == h1) {
+                collision2++;
+            }
         } else {
-            arr[r0_3(h, len)].push_back(h);
-            arr[r1_3(h, len)].push_back(h);
-            arr[r2_3(h, len)].push_back(h);
+            size_t h0 = r0_3(h, len);
+            arr[h0].push_back(h);
+            size_t h1 = r1_3(h, len);
+            arr[h1].push_back(h);
+            size_t h2 = r2_3(h, len);
+            arr[h2].push_back(h);
+            if (h0 == h1 || h1 == h2 || h0 == h2) {
+                collision3++;
+            }
         }
     }
 
@@ -140,6 +153,7 @@ int main(int argc, char *argv[]) {
     } while (more_todo);
 
     std::cout << "3x" << nkeys << " over " << len << ":" << std::endl;
+    std::cout << "collision2 " << collision2 << ", collision3 " << collision3 << std::endl;
     std::cout << "initial_unmapped: " << initial_unmapped << " (" << (100.0 * initial_unmapped / len) << "%)" << std::endl;
     std::cout << "initial_run: " << initial_run << " (" << (100.0 * initial_run / len) << "%)" << std::endl;
     std::cout << "later_mapped: " << later_mapped << " (" << (100.0 * later_mapped / len) << "%)" << std::endl;
