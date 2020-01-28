@@ -16,21 +16,24 @@ inline uint32_t fastrange32(uint32_t hash, uint32_t range) {
     return static_cast<uint32_t>(wide >> 32);
 }
 
+static uint64_t sqrt_len_mask = (uint64_t{1} << 54) - 1;
+static uint64_t half_len_mask = (uint64_t{1} << 63) - 1;
+
 size_t r0_2(uint64_t h, size_t len) {
     return fastrange64(h, len);
 }
 size_t r1_2(uint64_t h, size_t len) {
-    return fastrange64((h >> 21) | (h << 43), len);
+    return fastrange64(h + half_len_mask + (((h << 38) | (h >> (64-38))) & sqrt_len_mask), len);
 }
 
 size_t r0_3(uint64_t h, size_t len) {
-    return fastrange32(static_cast<uint32_t>(h), static_cast<uint32_t>(len));
+    return fastrange64(h, len);
 }
 size_t r1_3(uint64_t h, size_t len) {
-    return fastrange32(static_cast<uint32_t>(h >> 32) ^ 0x9e3779b9, static_cast<uint32_t>(len));
+    return (fastrange64(h + (((h << 19) | (h >> (64-19))) & sqrt_len_mask), len) + 1) % len;
 }
 size_t r2_3(uint64_t h, size_t len) {
-    return fastrange32(static_cast<uint32_t>(h) ^ static_cast<uint32_t>(h >> 32), static_cast<uint32_t>(len));
+    return fastrange64(h + half_len_mask + (((h << 38) | (h >> (64-38))) & sqrt_len_mask), len);
 }
 
 void remove(std::vector<uint64_t>& v, uint64_t e) {
@@ -75,11 +78,13 @@ int main(int argc, char *argv[]) {
     }
 
     size_t initial_unmapped = 0;
+    size_t max_overlap = 0;
 
     for (size_t i = 0; i < len; ++i) {
         if (arr[i].empty()) {
             initial_unmapped++;
         }
+        max_overlap = std::max(max_overlap, arr[i].size());
     }
 
     size_t initial_run = 0;
@@ -160,6 +165,7 @@ int main(int argc, char *argv[]) {
     std::cout << "3x" << nkeys << " over " << len << ":" << std::endl;
     std::cout << "collision2 " << collision2 << ", collision3 " << collision3 << std::endl;
     std::cout << "initial_unmapped: " << initial_unmapped << " (" << (100.0 * initial_unmapped / len) << "%)" << std::endl;
+    std::cout << "max_overlap: " << max_overlap << std::endl;
     std::cout << "initial_run: " << initial_run << " (" << (100.0 * initial_run / len) << "%)" << std::endl;
     std::cout << "later_mapped: " << later_mapped << " (" << (100.0 * later_mapped / len) << "%)" << std::endl;
     std::cout << "kicked: " << kicked << " (" << (100.0 * kicked / len) << "%)" << std::endl;
