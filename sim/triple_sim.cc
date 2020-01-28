@@ -16,28 +16,33 @@ inline uint32_t fastrange32(uint32_t hash, uint32_t range) {
     return static_cast<uint32_t>(wide >> 32);
 }
 
-static uint64_t sqrt_len_mask = (uint64_t{1} << 54) - 1;
-static uint64_t half_len_mask = (uint64_t{1} << 63) - 1;
-
-size_t r0_2(uint64_t h, size_t len) {
-    return fastrange64(h, len);
+size_t r0_3(uint64_t h, size_t seg_len, size_t segs_base) {
+    size_t rv = (h % segs_base) * seg_len;
+    h /= segs_base;
+    return rv + (h % seg_len);
 }
-size_t r1_2(uint64_t h, size_t len) {
-    return fastrange64(h + half_len_mask + (((h << 38) | (h >> (64-38))) & sqrt_len_mask), len);
+size_t r1_3(uint64_t h, size_t seg_len, size_t segs_base) {
+    size_t rv = ((h % segs_base) + 1) * seg_len;
+    h /= segs_base;
+    h /= seg_len;
+    return rv + (h % seg_len);
 }
-
-size_t r0_3(uint64_t h, size_t len) {
-    return fastrange64(h, len);
-}
-size_t r1_3(uint64_t h, size_t len) {
-    return (fastrange64(h + (((h << 19) | (h >> (64-19))) & sqrt_len_mask), len) + 1) % len;
-}
-size_t r2_3(uint64_t h, size_t len) {
-    return fastrange64(h + half_len_mask + (((h << 38) | (h >> (64-38))) & sqrt_len_mask), len);
+size_t r2_3(uint64_t h, size_t seg_len, size_t segs_base) {
+    size_t rv = ((h % segs_base) + 2) * seg_len;
+    h /= segs_base;
+    h /= seg_len;
+    h /= seg_len;
+    return rv + h;
 }
 
 void remove(std::vector<uint64_t>& v, uint64_t e) {
     v.erase(std::find(v.begin(), v.end(), e));
+}
+
+void insert(std::vector<uint64_t>& v, uint64_t e) {
+    if (std::find(v.begin(), v.end(), e) == v.end()) {
+        v.push_back(e);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -45,31 +50,26 @@ int main(int argc, char *argv[]) {
 
     size_t nkeys = (size_t)std::atoi(argv[1]);
     size_t len = (size_t)std::atoi(argv[2]);
-    unsigned threshold = 0;
-    if (argc > 3) {
-        threshold = (unsigned)std::atoi(argv[3]);
-    }
+    size_t segs_base = (size_t)std::atoi(argv[3]);
 
     std::vector<uint64_t> *arr = new std::vector<uint64_t>[len];
 
     size_t collision2 = 0;
     size_t collision3 = 0;
+    size_t good_collision = 0;
+    size_t seg_len = len / (segs_base + 2);
+    len = seg_len * (segs_base + 2);
+    uint64_t mod = seg_len * seg_len * seg_len * segs_base;
     for (size_t i = 0; i < nkeys; ++i) {
-        uint64_t h = (uint64_t)rand();
-        if (((h ^ (h >> 32)) & 255) < threshold) {
-            size_t h0 = r0_2(h, len);
-            arr[h0].push_back(h);
-            size_t h1 = r1_2(h, len);
-            arr[h1].push_back(h);
-            if (h0 == h1) {
-                collision2++;
-            }
+        uint64_t h = (uint64_t)rand() % mod;
+        size_t h0 = r0_3(h, seg_len, segs_base);
+        if (std::find(arr[h0].begin(), arr[h0].end(), h) != arr[h0].end()) {
+            good_collision++;
         } else {
-            size_t h0 = r0_3(h, len);
             arr[h0].push_back(h);
-            size_t h1 = r1_3(h, len);
+            size_t h1 = r1_3(h, seg_len, segs_base);
             arr[h1].push_back(h);
-            size_t h2 = r2_3(h, len);
+            size_t h2 = r2_3(h, seg_len, segs_base);
             arr[h2].push_back(h);
             if (h0 == h1 || h1 == h2 || h0 == h2) {
                 collision3++;
@@ -107,14 +107,8 @@ int main(int argc, char *argv[]) {
                     later_mapped++;
                 }
                 uint64_t h = arr[i][0];
-                if (((h ^ (h >> 32)) & 255) < threshold) {
-                    for (size_t j : {r0_2(h, len), r1_2(h, len)}) {
-                        remove(arr[j], h);
-                    }
-                } else {
-                    for (size_t j : {r0_3(h, len), r1_3(h, len), r2_3(h, len)}) {
-                        remove(arr[j], h);
-                    }
+                for (size_t j : {r0_3(h, seg_len, segs_base), r1_3(h, seg_len, segs_base), r2_3(h, seg_len, segs_base)}) {
+                    remove(arr[j], h);
                 }
             } else {
                 more_todo = true;
@@ -127,14 +121,8 @@ int main(int argc, char *argv[]) {
                 if (count == 2) {
                     kicked++;
                     uint64_t h = arr[i][0];
-                    if (((h ^ (h >> 32)) & 255) < threshold) {
-                        for (size_t j : {r0_2(h, len), r1_2(h, len)}) {
-                            remove(arr[j], h);
-                        }
-                    } else {
-                        for (size_t j : {r0_3(h, len), r1_3(h, len), r2_3(h, len)}) {
-                            remove(arr[j], h);
-                        }
+                    for (size_t j : {r0_3(h, seg_len, segs_base), r1_3(h, seg_len, segs_base), r2_3(h, seg_len, segs_base)}) {
+                        remove(arr[j], h);
                     }
                     good_kick = true;
                     break;
@@ -146,14 +134,8 @@ int main(int argc, char *argv[]) {
                     if (count > 1) {
                         kicked++;
                         uint64_t h = arr[i][0];
-                        if (((h ^ (h >> 32)) & 255) < threshold) {
-                            for (size_t j : {r0_2(h, len), r1_2(h, len)}) {
-                                remove(arr[j], h);
-                            }
-                        } else {
-                            for (size_t j : {r0_3(h, len), r1_3(h, len), r2_3(h, len)}) {
-                                remove(arr[j], h);
-                            }
+                        for (size_t j : {r0_3(h, seg_len, segs_base), r1_3(h, seg_len, segs_base), r2_3(h, seg_len, segs_base)}) {
+                            remove(arr[j], h);
                         }
                         break;
                     }
@@ -163,7 +145,7 @@ int main(int argc, char *argv[]) {
     } while (more_todo);
 
     std::cout << "3x" << nkeys << " over " << len << ":" << std::endl;
-    std::cout << "collision2 " << collision2 << ", collision3 " << collision3 << std::endl;
+    std::cout << "good collision " << good_collision << ", collision2 " << collision2 << ", collision3 " << collision3 << std::endl;
     std::cout << "initial_unmapped: " << initial_unmapped << " (" << (100.0 * initial_unmapped / len) << "%)" << std::endl;
     std::cout << "max_overlap: " << max_overlap << std::endl;
     std::cout << "initial_run: " << initial_run << " (" << (100.0 * initial_run / len) << "%)" << std::endl;
