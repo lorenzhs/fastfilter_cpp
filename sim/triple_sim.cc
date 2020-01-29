@@ -32,7 +32,7 @@ size_t r1_3(uint64_t h) {
     return rv + (h % seg_len);
 }
 size_t r2_3(uint64_t h) {
-    size_t rv = ((h % segs_base) + (2 * segs_not_shards)) * seg_len;
+    size_t rv = (((h % segs_base) + (2 * segs_not_shards)) % (segs_base + 1)) * seg_len;
     h /= segs_base;
     h /= seg_len;
     h /= seg_len;
@@ -65,8 +65,8 @@ int main(int argc, char *argv[]) {
         // positive -> segments
         segs_base = (size_t)segs_or_shards;
         segs_not_shards = true;
-        seg_len = len / (segs_base + 2);
-        len = seg_len * (segs_base + 2);
+        seg_len = len / (segs_base + 1);
+        len = seg_len * (segs_base + 1);
     } else {
         return 1;
     }
