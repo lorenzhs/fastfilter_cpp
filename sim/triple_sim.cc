@@ -53,7 +53,8 @@ int main(int argc, char *argv[]) {
     std::mt19937_64 rand(getpid());
 
     size_t nkeys = (size_t)std::atoi(argv[1]);
-    size_t len = (size_t)std::atoi(argv[2]);
+    double f = std::atof(argv[2]);
+    size_t len = (size_t)(f * nkeys);
     int segs_or_shards = std::atoi(argv[3]);
     if (segs_or_shards < 0) {
         // negative -> shards  (-1 -> Xor filter)
