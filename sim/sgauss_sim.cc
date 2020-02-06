@@ -105,6 +105,7 @@ int main(int argc, char *argv[]) {
     std::cout << "peak_static_contention: " << peak_static_contention << std::endl;
     std::cout << "min_static_spread: " << min_static_spread << std::endl;
     std::cout << "peak_dynamic_contention: " << peak_dynamic_contention << std::endl;
+    std::cout << "tail_waste: " << (len - 1 - data[nkeys-1].pivot) << std::endl;
     std::cout << std::endl;
     std::cout << "keys2 " << nkeys << " over " << len << " (" << ((double)len / nkeys) << "x)" << std::endl;
     std::cout << "kicked: " << failed_rows1 << " (" << (100.0 * failed_rows1 / nkeys) << "%)" << std::endl;
