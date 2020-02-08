@@ -17,12 +17,20 @@ inline uint32_t fastrange32(uint32_t hash, uint32_t range) {
     return static_cast<uint32_t>(wide >> 32);
 }
 
+static constexpr uint32_t front_smash = 20;
+static constexpr uint32_t back_smash = 20;
+
 struct GaussData {
     uint64_t row = 0;
     uint32_t start = 0;
     uint32_t pivot = 0;
-    void Reset(uint64_t h, uint32_t addrs, uint64_t seed) {
+    void Reset(uint64_t h, uint32_t len, uint64_t seed) {
+        uint32_t addrs = len - 63 + front_smash + back_smash;
         start = fastrange32((uint32_t)(h >> 32), addrs);
+        start = std::max(start, front_smash);
+        start -= front_smash;
+        start = std::min(start, len - 64);
+        assert(start < len - 63);
         row = h + seed * seed;
         row ^= h >> 32;
         //row |= (uint64_t{1} << 63);
@@ -33,7 +41,7 @@ struct GaussData {
 
 static uint32_t peak_dynamic_contention = 0;
 
-uint32_t run(GaussData *data, uint32_t nkeys) {
+uint32_t run(GaussData *data, uint32_t nkeys, uint32_t len) {
     uint32_t failed_rows = 0;
     for (uint32_t i = 0; i < nkeys; ++i) {
         GaussData &di = data[i];
@@ -43,6 +51,7 @@ uint32_t run(GaussData *data, uint32_t nkeys) {
         }
         int tz = __builtin_ctzl(di.row);
         di.pivot = di.start + tz;
+        assert(di.pivot < len);
         uint32_t contention = 0;
         for (uint32_t j = i + 1; j < nkeys; ++j) {
             GaussData &dj = data[j];
@@ -66,7 +75,6 @@ int main(int argc, char *argv[]) {
     uint32_t nkeys = (uint32_t)std::atoi(argv[1]);
     double f = std::atof(argv[2]);
     uint32_t len = (uint32_t)(f * nkeys / 64 + 0.5) * 64;
-    uint32_t addrs = len - 63;
 
     std::vector<uint64_t> orig;
     for (uint32_t i = 0; i < nkeys; ++i) {
@@ -83,7 +91,7 @@ int main(int argc, char *argv[]) {
     uint32_t peak_static_contention = 0;
     uint32_t min_static_spread = 1000;
     for (uint32_t i = 0; i < nkeys; ++i) {
-        data[i].Reset(orig[i], addrs, 0x9e3779b97f4a7c13);
+        data[i].Reset(orig[i], len, 0x9e3779b97f4a7c13);
         if (data[i].start == prev_start) {
             ++cur_same_start_count;
             max_same_start_count = std::max(max_same_start_count, cur_same_start_count);
@@ -100,12 +108,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    uint32_t failed_rows1 = run(data, nkeys);
+    uint32_t failed_rows1 = run(data, nkeys, len);
     std::cout << "max_same_start_count: " << max_same_start_count << std::endl;
     std::cout << "peak_static_contention: " << peak_static_contention << std::endl;
     std::cout << "min_static_spread: " << min_static_spread << std::endl;
     std::cout << "peak_dynamic_contention: " << peak_dynamic_contention << std::endl;
-    std::cout << "tail_waste: " << (len - 1 - data[nkeys-1].pivot) << std::endl;
+    std::cout << "tail_waste: " << (len - data[nkeys-1].pivot) << std::endl;
     std::cout << std::endl;
     std::cout << "keys2 " << nkeys << " over " << len << " (" << ((double)len / nkeys) << "x)" << std::endl;
     std::cout << "kicked: " << failed_rows1 << " (" << (100.0 * failed_rows1 / nkeys) << "%)" << std::endl;
@@ -115,12 +123,12 @@ int main(int argc, char *argv[]) {
         if (false/*(orig[i] & 63) == 0*/) {
             continue;
         } else {
-            data[nkeys2].Reset(orig[nkeys2], addrs, 0x2be9387616572381);
+            data[nkeys2].Reset(orig[nkeys2], len, 0x2be9387616572381);
             ++nkeys2;
         }
     }
 
-    uint32_t failed_rows2 = run(data, nkeys2);
+    uint32_t failed_rows2 = run(data, nkeys2, len);
 
     std::cout << std::endl;
     std::cout << "keys2 " << nkeys2 << " over " << len << " (" << ((double)len / nkeys2) << "x)" << std::endl;

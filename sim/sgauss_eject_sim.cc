@@ -17,21 +17,26 @@ inline uint32_t fastrange32(uint32_t hash, uint32_t range) {
     return static_cast<uint32_t>(wide >> 32);
 }
 
+static constexpr uint32_t front_smash = 20;
+static constexpr uint32_t back_smash = 20;
+
 struct GaussData {
     uint64_t row = 0;
     uint32_t start = 0;
     uint32_t pivot = 0;
     uint32_t section = 0;
-    void Reset(uint64_t h, uint32_t addrs, uint32_t len, uint64_t seed) {
-        //start = fastrange32((uint32_t)(h >> 32), addrs);
-        start = fastrange32((uint32_t)(h >> 32), len);
-        if (start > addrs + 1) {
-            start = 1 + addrs + (start - addrs) / 2;
-        }
+    void Reset(uint64_t h, uint32_t len, uint64_t seed) {
+        uint32_t addrs = len - 63 + front_smash + back_smash;
+        start = fastrange32((uint32_t)(h >> 32), addrs);
+        start = std::max(start, front_smash);
+        start -= front_smash;
+        start = std::min(start, len - 64);
+        assert(start < len - 63);
         row = h * seed;
         row |= (uint64_t{1} << 63);
         pivot = 0;
-        section = (row ^ (row >> 27) ^ (row >> 51)) & 63;
+        section = (row ^ (row >> 27) ^ (row >> 51)) & 255;
+        if (section > 31) { section = 0; }
     }
 };
 
@@ -41,7 +46,6 @@ int main(int argc, char *argv[]) {
     uint32_t nkeys = (uint32_t)std::atoi(argv[1]);
     double f = std::atof(argv[2]);
     uint32_t len = (uint32_t)(f * nkeys / 64 + 0.5) * 64;
-    uint32_t addrs = len - 63;
 
     std::vector<uint64_t> orig;
     for (uint32_t i = 0; i < nkeys; ++i) {
@@ -52,15 +56,15 @@ int main(int argc, char *argv[]) {
 
     GaussData *data = new GaussData[nkeys];
     uint64_t kept_sections = -1;
-    uint64_t pinned_sections = 0;
+    uint64_t pinned_sections = 1;
     while (__builtin_popcountl(pinned_sections) < 3) {
-        pinned_sections |= uint64_t{1} << (rand() & 63);
+        pinned_sections |= uint64_t{1} << ((unsigned)rand() % 63 + 1);
     }
     uint32_t failed_rows = 0;
 
     restart:
     for (uint32_t i = 0; i < nkeys; ++i) {
-        data[i].Reset(orig[i], addrs, len, 0x9e3779b97f4a7c13);
+        data[i].Reset(orig[i], len, 0x9e3779b97f4a7c13);
     }
 
     for (uint32_t i = 0; i < nkeys; ++i) {
@@ -71,7 +75,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
         if (di.row == 0) {
-            while (pinned_sections & section_bit) {
+            while (pinned_sections & section_bit || !(kept_sections & section_bit)) {
                 if (i > 0) {
                     --i;
                     section_bit = uint64_t{1} << data[i].section;

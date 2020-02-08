@@ -36,35 +36,40 @@ int main(int argc, char *argv[]) {
 
     uint32_t nkeys = (uint32_t)std::atoi(argv[1]);
     uint32_t shard_size = (uint32_t)std::atoi(argv[2]);
-    uint32_t nshards = ((uint32_t)(nkeys * 1.033) + shard_size - 1) / shard_size;
-    uint32_t naddrs = nshards - 1;
-    uint32_t shard_max_keys = (uint32_t)(0.97 * shard_size);
+    double f = std::atof(argv[3]);
+    uint32_t nshards = ((uint32_t)(nkeys * f) + shard_size - 1) / shard_size;
+    uint32_t naddrs = nshards * shard_size - (shard_size / 10);
+    uint32_t shard_max_keys = (uint32_t)(shard_size / f * 1.005);
 
     uint64_t *shard_counts = new uint64_t[nshards];
     for (uint32_t i = 0; i < nshards; ++i) {
         shard_counts[i] = 0;
     }
     for (uint32_t i = 0; i < nkeys; ++i) {
-        shard_counts[fastrange32((uint32_t)rand(), naddrs)]++;
+        shard_counts[fastrange32((uint32_t)rand(), naddrs) % nshards]++;
     }
 
-    for (uint32_t i = 0; i < naddrs; ++i) {
+    uint64_t max_overflow = 0;
+    for (uint32_t i = 0; i < nshards - 1; ++i) {
         if (shard_counts[i] > shard_max_keys) {
-            shard_counts[i+1] += shard_counts[i] - shard_max_keys;
+            uint64_t overflow = shard_counts[i] - shard_max_keys;
+            shard_counts[i+1] += overflow;
             shard_counts[i] = shard_max_keys;
+            max_overflow = std::max(max_overflow, overflow);
         }
     }
     uint32_t kicked = 0;
     uint32_t margin = 0;
-    if (shard_counts[naddrs] > shard_max_keys) {
-        kicked = shard_counts[naddrs] - shard_max_keys;
+    if (shard_counts[nshards - 1] > shard_max_keys) {
+        kicked = shard_counts[nshards - 1] - shard_max_keys;
     } else {
-        margin = shard_max_keys - shard_counts[naddrs];
+        margin = shard_max_keys - shard_counts[nshards - 1];
     }
 
     std::cout << "keys " << nkeys << " over " << nshards << " shards" << std::endl;
     std::cout << "shard_max_keys: " << shard_max_keys << " shard_size: " << shard_size << " (" << (100.0 * shard_max_keys / shard_size) << "%)" << std::endl;
     std::cout << "kicked: " << kicked << " margin: " << margin << std::endl;
+    std::cout << "max_overflow: " << max_overflow << " (" << (100.0 * max_overflow / shard_size) << "%)" << std::endl;
 
     return 0;
 }
