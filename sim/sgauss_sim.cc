@@ -17,24 +17,25 @@ inline uint32_t fastrange32(uint32_t hash, uint32_t range) {
     return static_cast<uint32_t>(wide >> 32);
 }
 
-static constexpr uint32_t front_smash = 20;
-static constexpr uint32_t back_smash = 20;
+// Best is around 20/20, but this can make for slightly faster queries
+static constexpr uint32_t front_smash = 32;
+static constexpr uint32_t back_smash = 31;
 
 struct GaussData {
     uint64_t row = 0;
     uint32_t start = 0;
     uint32_t pivot = 0;
-    void Reset(uint64_t h, uint32_t len, uint64_t seed) {
+    void Reset(uint64_t h, uint32_t len) {
         uint32_t addrs = len - 63 + front_smash + back_smash;
         start = fastrange32((uint32_t)(h >> 32), addrs);
         start = std::max(start, front_smash);
         start -= front_smash;
         start = std::min(start, len - 64);
         assert(start < len - 63);
-        row = h + seed * seed;
+        row = h + 0x9e3779b97f4a7c13 * 0x9e3779b97f4a7c13;
         row ^= h >> 32;
-        //row |= (uint64_t{1} << 63);
-        //row = h * addrs;
+        //row |= 1;
+        row |= (uint64_t{1} << 63);
         pivot = 0;
     }
 };
@@ -81,7 +82,10 @@ int main(int argc, char *argv[]) {
         uint64_t h = (uint64_t)rand();
         orig.push_back(h);
     }
-    std::sort(orig.begin(), orig.end());
+
+    std::vector<uint64_t> hashes = orig;
+
+    std::sort(hashes.begin(), hashes.end());
 
     GaussData *data = new GaussData[nkeys];
     uint32_t prev_start = -1;
@@ -91,7 +95,7 @@ int main(int argc, char *argv[]) {
     uint32_t peak_static_contention = 0;
     uint32_t min_static_spread = 1000;
     for (uint32_t i = 0; i < nkeys; ++i) {
-        data[i].Reset(orig[i], len, 0x9e3779b97f4a7c13);
+        data[i].Reset(hashes[i], len);
         if (data[i].start == prev_start) {
             ++cur_same_start_count;
             max_same_start_count = std::max(max_same_start_count, cur_same_start_count);
@@ -108,7 +112,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    uint32_t failed_rows1 = run(data, nkeys, len);
+    uint32_t failed_rows = run(data, nkeys, len);
     std::cout << "max_same_start_count: " << max_same_start_count << std::endl;
     std::cout << "peak_static_contention: " << peak_static_contention << std::endl;
     std::cout << "min_static_spread: " << min_static_spread << std::endl;
@@ -116,22 +120,32 @@ int main(int argc, char *argv[]) {
     std::cout << "tail_waste: " << (len - data[nkeys-1].pivot) << std::endl;
     std::cout << std::endl;
     std::cout << "keys2 " << nkeys << " over " << len << " (" << ((double)len / nkeys) << "x)" << std::endl;
-    std::cout << "kicked: " << failed_rows1 << " (" << (100.0 * failed_rows1 / nkeys) << "%)" << std::endl;
+    std::cout << "kicked: " << failed_rows << " (" << (100.0 * failed_rows / nkeys) << "%)" << std::endl;
 
-    uint32_t nkeys2 = 0;
-    for (uint32_t i = 0; i < nkeys; ++i) {
-        if (false/*(orig[i] & 63) == 0*/) {
-            continue;
-        } else {
-            data[nkeys2].Reset(orig[nkeys2], len, 0x2be9387616572381);
-            ++nkeys2;
+    uint32_t retries = 0;
+    uint64_t seed = 1;
+    while (failed_rows > 0 && retries < 100) {
+        ++retries;
+        seed *= 0x9e3779b97f4a7c13;
+        for (uint32_t i = 0; i < nkeys; ++i) {
+            hashes[i] = orig[i];
+            if (i < nkeys /** 6 / 32*/) {
+                hashes[i] *= seed;
+            }
         }
+        std::sort(hashes.begin(), hashes.end());
+
+        for (uint32_t i = 0; i < nkeys; ++i) {
+            if (false/*(orig[i] & 63) == 0*/) {
+                continue;
+            } else {
+                data[i].Reset(hashes[i], len);
+            }
+        }
+        failed_rows = run(data, nkeys, len);
     }
 
-    uint32_t failed_rows2 = run(data, nkeys2, len);
-
     std::cout << std::endl;
-    std::cout << "keys2 " << nkeys2 << " over " << len << " (" << ((double)len / nkeys2) << "x)" << std::endl;
-    std::cout << "kicked2: " << failed_rows2 << " (" << (100.0 * failed_rows2 / nkeys2) << "%)" << std::endl;
+    std::cout << "retries_to_success: " << retries << std::endl;
     return 0;
 }

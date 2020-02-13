@@ -37,9 +37,9 @@ int main(int argc, char *argv[]) {
     uint32_t nkeys = (uint32_t)std::atoi(argv[1]);
     uint32_t shard_size = (uint32_t)std::atoi(argv[2]);
     double f = std::atof(argv[3]);
-    uint32_t nshards = ((uint32_t)(nkeys * f) + shard_size - 1) / shard_size;
-    uint32_t naddrs = nshards * shard_size - (shard_size / 10);
-    uint32_t shard_max_keys = (uint32_t)(shard_size / f * 1.005);
+    uint32_t nshards = ((uint32_t)(nkeys * 1.02 * f) + shard_size - 1) / shard_size;
+    uint32_t naddrs = nshards * shard_size - (shard_size / 16);
+    uint32_t shard_max_keys = (uint32_t)(shard_size / 1.02);
 
     uint64_t *shard_counts = new uint64_t[nshards];
     for (uint32_t i = 0; i < nshards; ++i) {
@@ -48,20 +48,30 @@ int main(int argc, char *argv[]) {
     for (uint32_t i = 0; i < nkeys; ++i) {
         shard_counts[fastrange32((uint32_t)rand(), naddrs) % nshards]++;
     }
+    shard_counts[nshards - 1] -= shard_size / 16;
+    shard_counts[0] += shard_size / 16;
 
-    uint64_t max_overflow = 0;
+    uint32_t unpinned_denom = 8;
+    uint32_t section_bits = 32;
+    uint32_t section_size = shard_max_keys / unpinned_denom / section_bits;
+    uint64_t fallback_count = 0;
     for (uint32_t i = 0; i < nshards - 1; ++i) {
         if (shard_counts[i] > shard_max_keys) {
             uint64_t overflow = shard_counts[i] - shard_max_keys;
-            shard_counts[i+1] += overflow;
-            shard_counts[i] = shard_max_keys;
-            max_overflow = std::max(max_overflow, overflow);
+            if (overflow * unpinned_denom > shard_max_keys) {
+                ++fallback_count;
+            } else {
+                uint64_t rounded_up = (overflow + section_size - 1) / section_size * section_size;
+                shard_counts[i+1] += rounded_up;
+                shard_counts[i] -= rounded_up;
+            }
         }
     }
     uint32_t kicked = 0;
     uint32_t margin = 0;
     if (shard_counts[nshards - 1] > shard_max_keys) {
         kicked = shard_counts[nshards - 1] - shard_max_keys;
+        ++fallback_count;
     } else {
         margin = shard_max_keys - shard_counts[nshards - 1];
     }
@@ -69,7 +79,7 @@ int main(int argc, char *argv[]) {
     std::cout << "keys " << nkeys << " over " << nshards << " shards" << std::endl;
     std::cout << "shard_max_keys: " << shard_max_keys << " shard_size: " << shard_size << " (" << (100.0 * shard_max_keys / shard_size) << "%)" << std::endl;
     std::cout << "kicked: " << kicked << " margin: " << margin << std::endl;
-    std::cout << "max_overflow: " << max_overflow << " (" << (100.0 * max_overflow / shard_size) << "%)" << std::endl;
+    std::cout << "fallback_count: " << fallback_count << " pct " << (100.0 * fallback_count / nshards) << std::endl;
 
     return 0;
 }
