@@ -32,9 +32,10 @@ struct GaussData {
         start -= front_smash;
         start = std::min(start, len - 64);
         assert(start < len - 63);
+        //Not as good? row = h * 0x9e3779b97f4a7c13;
         row = h + 0x9e3779b97f4a7c13 * 0x9e3779b97f4a7c13;
         row ^= h >> 32;
-        //row |= 1;
+        //Not as good? row |= 1;
         row |= (uint64_t{1} << 63);
         pivot = 0;
     }
