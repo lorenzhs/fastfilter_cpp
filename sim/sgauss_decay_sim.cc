@@ -32,8 +32,11 @@ struct GaussData {
         start = std::max(start, front_smash);
         start -= front_smash;
         start = std::min(start, len - 64);
+        // Without grouping by 16, ~ 1.0032
+        // With grouping by 16, ~ 1.0042
+        start &= ~uint32_t{15};
         assert(start < len - 63);
-        row = h + 0x9e3779b97f4a7c13 * 0x9e3779b97f4a7c13;
+        row = (h + 0x9e3779b97f4a7c13) * 0x9e3779b97f4a7c13;
         row ^= h >> 32;
         row |= (uint64_t{1} << 63);
         pivot = 0;
@@ -120,7 +123,7 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
         }
-        
+
         retry:
         uint64_t seed = rot64(uint64_t{0x9e3779b97f4a7c13}, (last_section * 13) & 63);
         for (uint64_t h : bumped[shard]) {
@@ -128,8 +131,8 @@ int main(int argc, char *argv[]) {
         }
         for (uint32_t i = 0; i <= last_section; ++i) {
             for (uint64_t h : hashes[shard][i]) {
-                //shard_hashes.push_back(rot64(h * 0x9e3779b97f4a7c13, (last_section * 13) & 63) * 0x9e3779b97f4a7c13);
-                shard_hashes.push_back(h * seed);
+                shard_hashes.push_back(rot64(h, (last_section * 39) & 63) * 0x9e3779b97f4a7c13);
+                //shard_hashes.push_back(h * seed);
             }
         }
         assert(kept_count == shard_hashes.size());

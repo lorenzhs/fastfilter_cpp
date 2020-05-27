@@ -31,17 +31,36 @@ struct GaussData {
         start = std::max(start, front_smash);
         start -= front_smash;
         start = std::min(start, len - 64);
+        // Possible optimization for construction time:
+        // group start locations every 16 bits, with
+        // each group < 1 in 10,000 chance of > 32 entries,
+        // -> good for SIMD construction
+        start &= ~uint32_t{15};
         assert(start < len - 63);
         //Not as good? row = h * 0x9e3779b97f4a7c13;
-        row = h + 0x9e3779b97f4a7c13 * 0x9e3779b97f4a7c13;
+        //*
+        row = (h + 0x9e3779b97f4a7c13) * 0x9e3779b97f4a7c13;
         row ^= h >> 32;
         //Not as good? row |= 1;
         row |= (uint64_t{1} << 63);
+        //*/
+        /*
+        // Not much different in construction time
+        row = (uint64_t{1} << (h & 7)) +
+              (uint64_t{1} << 8 << ((h >> 3) & 7)) +
+              (uint64_t{1} << 16 << ((h >> 6) & 7)) +
+              (uint64_t{1} << 24 << ((h >> 9) & 7)) +
+              (uint64_t{1} << 32 << ((h >> 12) & 7)) +
+              (uint64_t{1} << 40 << ((h >> 15) & 7)) +
+              (uint64_t{1} << 48 << ((h >> 18) & 7)) +
+              (uint64_t{1} << 54 << ((h >> 21) & 7));
+        //*/
         pivot = 0;
     }
 };
 
 static uint32_t peak_dynamic_contention = 0;
+static uint32_t total_iterations = 0;
 
 uint32_t run(GaussData *data, uint32_t nkeys, uint32_t len) {
     uint32_t failed_rows = 0;
@@ -62,6 +81,7 @@ uint32_t run(GaussData *data, uint32_t nkeys, uint32_t len) {
                 break;
             }
             ++contention;
+            ++total_iterations;
             if ((dj.row >> (di.pivot - dj.start)) & 1) {
                 dj.row ^= (di.row >> (dj.start - di.start));
             }
@@ -119,6 +139,7 @@ int main(int argc, char *argv[]) {
     std::cout << "min_static_spread: " << min_static_spread << std::endl;
     std::cout << "peak_dynamic_contention: " << peak_dynamic_contention << std::endl;
     std::cout << "tail_waste: " << (len - data[nkeys-1].pivot) << std::endl;
+    std::cout << "total_iterations: " << total_iterations << std::endl;
     std::cout << std::endl;
     std::cout << "keys2 " << nkeys << " over " << len << " (" << ((double)len / nkeys) << "x)" << std::endl;
     std::cout << "kicked: " << failed_rows << " (" << (100.0 * failed_rows / nkeys) << "%)" << std::endl;

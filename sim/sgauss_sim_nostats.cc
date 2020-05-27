@@ -22,11 +22,13 @@ struct GaussData {
     uint32_t start = 0;
     uint32_t pivot = 0;
     void Reset(uint64_t h, uint32_t addrs, uint32_t len, uint64_t seed) {
-        //start = fastrange32((uint32_t)(h >> 32), addrs);
+        start = fastrange32((uint32_t)(h >> 32), addrs);
+        /*
         start = fastrange32((uint32_t)(h >> 32), len);
         if (start > addrs + 1) {
+            // XXX: cheating (out of bounds)
             start = 1 + addrs + (start - addrs) / 2;
-        }
+        }*/
         row = h * seed;
         row |= (uint64_t{1} << 63);
         pivot = 0;
