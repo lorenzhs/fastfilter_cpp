@@ -398,7 +398,7 @@ SimdBlockFilterFixed<HashFamily>::Find(const uint64_t key) const noexcept {
 /// 16-byte version (not very good)
 ///////////////////////////////////////////////////////////////////
 
-#ifdef __SSE41__
+#ifdef __SSE4_1__
 
 #include <smmintrin.h>
 
@@ -456,7 +456,7 @@ SimdBlockFilterFixed16<HashFamily>::MakeMask(const uint64_t hash) noexcept {
       0xa2b7, 0x7053, 0x2df1, 0x9efc, 0x5c6b);
   __m128i hash_data = _mm_set1_epi32(hash );
   __m128i h = _mm_mulhi_epi16(rehash1, hash_data);
-return _mm_shuffle_epi8(_mm_set_epi8(1,2,4,8,16,32,64,-128,1,2,4,8,16,32,64,-128),h); 
+return _mm_shuffle_epi8(_mm_set_epi8(1,2,4,8,16,32,64,-128,1,2,4,8,16,32,64,-128),h);
 }
 
 
