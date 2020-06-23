@@ -395,6 +395,7 @@ struct FilterAPI<MortonFilter> {
 template <typename MatchType, int match_bits, typename SectionsType, int pct_extra_overhead>
 class SectionedSGaussFilter {
     static constexpr uint32_t section_bits = sizeof(SectionsType) * 8U;
+    static_assert((section_bits & (section_bits - 1)) == 0, "power of two expected");
     static constexpr MatchType match_row_mask = (MatchType)((uint64_t{1} << match_bits) - 1);
     using Block = std::array<uint64_t, match_bits>;
 
@@ -413,12 +414,14 @@ class SectionedSGaussFilter {
     uint32_t GetVshardSize() const { return GetTotalSlots() >> log2_vshards; }
 
     static inline bool PreHashIsPinned(uint64_t pre_h) {
-      return (pre_h & 0x380) == 0x380;
+      // 5/8 pinned
+      return (pre_h & (7U * section_bits)) < 5U * section_bits;
     }
 
     static inline uint64_t PreHashToHash(uint64_t pre_h) {
-      if ((pre_h & uint64_t{0x8000000000000380}) == uint64_t{0x0000000000000380}) {
-        return pre_h + uint64_t{0x8000000000000000};
+      // Relocate 1/8 to upper half
+      if ((pre_h & (7U * section_bits)) == 7U * section_bits) {
+        return pre_h |= uint64_t{0x8000000000000000};
       } else {
         return pre_h;
       }
@@ -463,13 +466,14 @@ class SectionedSGaussFilter {
 
 public:
     SectionedSGaussFilter(const size_t add_count) {
-        // 1.007 without hopeless checking
-        // About 1.01 with hopeless checking
-        double space_factor = pct_extra_overhead < 0 ? 1.007 : 1.01;
+        // TODO: adjust slightly for scale?
+        // Not great around 10^5 count
+        constexpr double base_space_factor = pct_extra_overhead < 0 ? 1.0035 : 1.005;
+        double space_factor = base_space_factor;
         if (pct_extra_overhead > 0) {
           space_factor += 0.01 * pct_extra_overhead;
         }
-        uint32_t total_slots = static_cast<uint32_t>(space_factor * add_count + 32);
+        uint32_t total_slots = static_cast<uint32_t>(space_factor * add_count + 1);
         // Make it a multiple of 64 by rounding up
         total_slots = (total_slots + 63) & ~size_t{63};
         // Find power of two number of shards that gets average slots per shard
@@ -481,11 +485,10 @@ public:
             ++log2_vshards;
             vshard_size = (total_slots >> log2_vshards);
         }
-        // Slight adjustment for large shard size
-        if (vshard_size > 1000U) {
-          total_slots += static_cast<uint32_t>(0.002 * ((vshard_size - 1000.0) / 414.0) * add_count);
-          total_slots = (total_slots + 63) & ~size_t{63};
-        }
+        // Slight adjustment for (large) shard size
+        total_slots += static_cast<uint32_t>((base_space_factor - 1.0) * ((vshard_size - 707.0) / 707.0) * add_count);
+        total_slots = (total_slots + 63) & ~size_t{63};
+        vshard_size = (total_slots >> log2_vshards);
         this->valid_starts = total_slots - 63;
 
         this->vshard_hard_limit = vshard_size - (vshard_size * pct_extra_overhead / 2 / 100);
@@ -1301,6 +1304,7 @@ int main(int argc, char * argv[]) {
     {96, "SectionedSgaussFilterNoPad"},
     {97, "SectionedSgaussFilter2PctPad"},
     {98, "SectionedSgaussFilter5PctPad"},
+    {99, "SectionedSgaussFilter10PctPad"},
 
     // Sort
     {100, "Sort"},
@@ -1364,6 +1368,8 @@ int main(int argc, char * argv[]) {
   size_t actual_sample_size = MAX_SAMPLE_SIZE;
   if (actual_sample_size > add_count) {
     actual_sample_size = add_count;
+  } else if (actual_sample_size < 10000000) {
+    actual_sample_size = 10000000;
   }
 
   // Generating Samples ----------------------------------------------------------
@@ -1815,6 +1821,13 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
+  a = 99;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 10>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
   // Sort ----------------------------------------------------------
   a = 100;
