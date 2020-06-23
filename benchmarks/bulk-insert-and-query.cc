@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <vector>
 #include <set>
+#include <memory>
 #include <stdio.h>
 
 // morton
@@ -379,6 +380,301 @@ struct FilterAPI<MortonFilter> {
     }
     static void Add(uint64_t key, Table* table) {
         table->Add(key);
+    }
+    static void AddAll(const vector<uint64_t> keys, const size_t start, const size_t end, Table* table) {
+        table->AddAll(keys, start, end);
+    }
+    static void Remove(uint64_t key, Table * table) {
+        throw std::runtime_error("Unsupported");
+    }
+    CONTAIN_ATTRIBUTES static bool Contain(uint64_t key, Table * table) {
+        return table->Contain(key);
+    }
+};
+
+template <typename MatchType, int match_bits, typename SectionsType, int pct_extra_overhead>
+class SectionedSGaussFilter {
+    static constexpr uint32_t section_bits = sizeof(SectionsType) * 8U;
+    static constexpr MatchType match_row_mask = (MatchType)((uint64_t{1} << match_bits) - 1);
+    using Block = std::array<uint64_t, match_bits>;
+
+    uint32_t valid_starts; // total slots - 63
+    uint32_t log2_vshards;
+
+    uint32_t vshard_hard_limit;
+    uint32_t vshard_soft_limit;
+
+    // Each block has 64 slots of match_bits each
+    std::unique_ptr<Block[]> blocks;
+    std::unique_ptr<SectionsType[]> vshard_metadata;
+
+    uint32_t GetTotalSlots() const { return valid_starts + 63; }
+
+    uint32_t GetVshardSize() const { return GetTotalSlots() >> log2_vshards; }
+
+    static inline bool PreHashIsPinned(uint64_t pre_h) {
+      return (pre_h & 0x380) == 0x380;
+    }
+
+    static inline uint64_t PreHashToHash(uint64_t pre_h) {
+      if ((pre_h & uint64_t{0x8000000000000380}) == uint64_t{0x0000000000000380}) {
+        return pre_h + uint64_t{0x8000000000000000};
+      } else {
+        return pre_h;
+      }
+    }
+
+    static inline uint32_t HashToSection(uint64_t h) {
+      return h % section_bits;
+    }
+
+    inline uint32_t HashToStart(uint64_t h) {
+      return (uint32_t)fastrange64(h, valid_starts);
+    }
+
+    inline uint32_t HashToVshard(uint64_t h) {
+      return (uint32_t)(h >> 32 >> (32 - log2_vshards));
+    }
+
+    static inline uint64_t BumpHash(uint64_t h) {
+      int lz = __builtin_clzl(h);
+      uint64_t hh = h * 0x9e3779b97f4a7c13 * 0x9e3779b97f4a7c13 | (uint64_t{1} << 63);
+      return hh >> (lz + 1);
+    }
+
+    static inline uint64_t HashToCoeffRow(uint64_t h) {
+      uint64_t row = (h + (h >> 32)) * 0x9e3779b97f4a7c13;
+      row |= uint64_t{1} << 63;
+      return row;
+    }
+
+    static inline MatchType HashToMatchRow(uint64_t h) {
+      // NB: just h seems to cause some association affecting FP rate
+      return (MatchType)((h ^ (h >> 13) ^ (h >> 26)) & match_row_mask);
+    }
+
+    struct State {
+      // pack unaligned for space savings
+      char coeff_row_data[8];
+      uint64_t &coeff_row() { return *(uint64_t*)&coeff_row_data; }
+
+      MatchType match_row;
+    };
+
+public:
+    SectionedSGaussFilter(const size_t add_count) {
+        // 1.007 without hopeless checking
+        // About 1.01 with hopeless checking
+        double space_factor = pct_extra_overhead < 0 ? 1.007 : 1.01;
+        if (pct_extra_overhead > 0) {
+          space_factor += 0.01 * pct_extra_overhead;
+        }
+        uint32_t total_slots = static_cast<uint32_t>(space_factor * add_count + 32);
+        // Make it a multiple of 64 by rounding up
+        total_slots = (total_slots + 63) & ~size_t{63};
+        // Find power of two number of shards that gets average slots per shard
+        // closest to ~1000
+        // TODO: more generous for 1 shard overall
+        this->log2_vshards = 0;
+        uint32_t vshard_size = total_slots;
+        while (log2_vshards + 1 < 32 && vshard_size > 1414U) {
+            ++log2_vshards;
+            vshard_size = (total_slots >> log2_vshards);
+        }
+        // Slight adjustment for large shard size
+        if (vshard_size > 1000U) {
+          total_slots += static_cast<uint32_t>(0.002 * ((vshard_size - 1000.0) / 414.0) * add_count);
+          total_slots = (total_slots + 63) & ~size_t{63};
+        }
+        this->valid_starts = total_slots - 63;
+
+        this->vshard_hard_limit = vshard_size - (vshard_size * pct_extra_overhead / 2 / 100);
+        this->vshard_soft_limit = vshard_size - (vshard_size * pct_extra_overhead / 100);
+
+        blocks.reset(new Block[total_slots / 64]());
+        vshard_metadata.reset(new SectionsType[size_t{1} << log2_vshards]());
+    }
+    int64_t Add(State* state, uint64_t h) {
+        return AddWithStart(state, h, HashToStart(h));
+    }
+    int64_t AddWithStart(State* state, uint64_t h, uint32_t start) {
+        MatchType match_row = HashToMatchRow(h);
+        uint64_t coeff_row = HashToCoeffRow(h);
+
+        for (;;) {
+          if (coeff_row == 0) {
+            if (match_row == 0) {
+              // lucky duck
+              return -1;
+            } else {
+              // nope
+              return -2;
+            }
+          }
+          int tz = __builtin_ctzl(coeff_row);
+          start += static_cast<uint32_t>(tz);
+          coeff_row >>= tz;
+          assert(coeff_row & 1);
+          uint64_t other = state[start].coeff_row();
+          if (other == 0) {
+            state[start].coeff_row() = coeff_row;
+            state[start].match_row = match_row;
+            return start;
+          }
+          assert(other & 1);
+          coeff_row ^= other;
+          match_row ^= state[start].match_row;
+        }
+    }
+    void AddAll(const vector<uint64_t> keys, const size_t start, const size_t end) {
+        std::unique_ptr<State[]> state(new State[GetTotalSlots()]());
+        using SectionKeys = std::array<std::vector<uint64_t>, section_bits>;
+        std::unique_ptr<SectionKeys[]> vshard_section_keys(new SectionKeys[size_t{1} << log2_vshards]);
+        std::unique_ptr<uint32_t[]> vshard_counts(new uint32_t[size_t{1} << log2_vshards]());
+
+        size_t most_in_a_section = 0;
+        // pipeline0
+        uint64_t next_h = 1;
+        uint32_t next_start = 0;
+        size_t i = start;
+        for (; i < end; ++i) {
+          uint64_t pre_h = keys[i];
+          uint64_t h = PreHashToHash(pre_h);
+          if (PreHashIsPinned(pre_h)) {
+            next_h = h;
+            next_start = HashToStart(h);
+            __builtin_prefetch(&state[next_start], 0, 1);
+            ++vshard_counts[HashToVshard(h)];
+            break;
+          } else {
+            auto &section = vshard_section_keys[HashToVshard(h)][HashToSection(h)];
+            section.push_back(h);
+            most_in_a_section = std::max(most_in_a_section, section.size());
+          }
+        }
+        // pipeline1
+        for (; i < end; ++i) {
+          uint64_t pre_h = keys[i];
+          uint64_t h = PreHashToHash(pre_h);
+          if (PreHashIsPinned(pre_h)) {
+            uint64_t prev_h = next_h;
+            uint64_t prev_start = next_start;
+
+            next_h = h;
+            next_start = HashToStart(h);
+            __builtin_prefetch(&state[next_start], 0, 1);
+            ++vshard_counts[HashToVshard(h)];
+
+            int64_t pivot = AddWithStart(state.get(), prev_h, prev_start);
+            if (pivot == -2) {
+              throw std::runtime_error("Full on pinned");
+            }
+          } else {
+            auto &section = vshard_section_keys[HashToVshard(h)][HashToSection(h)];
+            section.push_back(h);
+            most_in_a_section = std::max(most_in_a_section, section.size());
+          }
+        }
+        // pipeline2
+        int64_t pivot = AddWithStart(state.get(), next_h, next_start);
+        if (pivot == -2) {
+          throw std::runtime_error("Full on pinned");
+        }
+
+        std::unique_ptr<uint32_t[]> undo_list(new uint32_t[most_in_a_section]);
+        for (uint32_t vs = (uint32_t{1} << log2_vshards); vs > 0;) {
+          --vs;
+          uint32_t& vshard_count = vshard_counts[vs];
+          for (uint32_t section = 0; section < section_bits; ++section) {
+            uint32_t undo_count = 0;
+            std::vector<uint64_t>& section_v = vshard_section_keys[vs][section];
+            if (pct_extra_overhead < 0 ||
+                ((pct_extra_overhead == 0 || vshard_count < vshard_hard_limit) &&
+                 section_v.size() + vshard_count < vshard_soft_limit)) {
+              // might fit
+              for (uint64_t h : section_v) {
+                int64_t pivot = Add(state.get(), h);
+                if (pivot >= 0) {
+                  undo_list[undo_count++] = pivot;
+                } else if (pivot == -2) {
+                  // failed. Undo
+                  for (uint32_t i = 0; i < undo_count; ++i) {
+                    state[undo_list[i]] = State();
+                  }
+                  undo_count = 0;
+                  break;
+                }
+              }
+              if (undo_count > 0) {
+                // success
+                vshard_counts[vs] += section_v.size();
+                continue;
+              }
+            }
+            // bump
+            vshard_metadata[vs] |= SectionsType{1} << section;
+            for (uint64_t h : vshard_section_keys[vs][section]) {
+              int64_t pivot = Add(state.get(), BumpHash(h));
+              if (pivot == -2) {
+                throw std::runtime_error("Full on bumped");
+              }
+            }
+          }
+        }
+
+        // yay! now back-propagation
+        Block tmp{};
+        for (uint32_t i = GetTotalSlots(); i > 0;) {
+          --i;
+          for (uint32_t j = 0; j < match_bits; ++j) {
+            tmp[j] <<= 1;
+            uint64_t coeff_bits = tmp[j] & state[i].coeff_row();
+            uint64_t bit = __builtin_popcountl(coeff_bits) ^ (state[i].match_row >> j);
+            tmp[j] |= (bit & 1);
+          }
+          if (i % 64 == 0) {
+            blocks[i / 64] = tmp;
+          }
+        }
+    }
+
+    inline bool Contain(uint64_t &item) {
+        uint64_t h = PreHashToHash(item);
+        uint32_t start = HashToStart(h);
+        if (!PreHashIsPinned(item)) {
+          if ((vshard_metadata[HashToVshard(h)] >> HashToSection(h)) & 1) {
+            h = BumpHash(h);
+            start = HashToStart(h);
+          }
+        }
+        uint64_t mask = HashToCoeffRow(h);
+        MatchType match_row = HashToMatchRow(h);
+        uint64_t lo_mask = (mask << (start % 64));
+        uint64_t hi_mask = (mask >> 1 >> ((63U - start) % 64));
+        const Block& lo_block = blocks[start / 64];
+        const Block& hi_block = blocks[(start + 63) / 64];
+        for (uint32_t i = 0; i < match_bits; ++i) {
+          uint64_t bits = (lo_block[i] & lo_mask) | (hi_block[i] & hi_mask);
+          uint64_t bit = __builtin_popcountl(bits) & 1;
+          if (((match_row >> i) & 1) != bit) {
+            return false;
+          }
+        }
+        return true;
+    };
+    size_t SizeInBytes() const {
+        return size_t{GetTotalSlots() / 8} * match_bits + (sizeof(vshard_metadata[0]) << log2_vshards);
+    }
+};
+
+template <typename MatchType, int match_bits, typename SectionsType, int pct_extra_overhead>
+struct FilterAPI<SectionedSGaussFilter<MatchType, match_bits, SectionsType, pct_extra_overhead>> {
+    using Table = SectionedSGaussFilter<MatchType, match_bits, SectionsType, pct_extra_overhead>;
+    static Table ConstructFromAddCount(size_t add_count) {
+        return Table(add_count);
+    }
+    static void Add(uint64_t key, Table* table) {
+        throw std::runtime_error("Unsupported");
     }
     static void AddAll(const vector<uint64_t> keys, const size_t start, const size_t end, Table* table) {
         table->AddAll(keys, start, end);
@@ -1001,6 +1297,11 @@ int main(int argc, char * argv[]) {
 
     {90, "XorFuse8"},
 
+    {95, "SectionedSgaussFilterPack"},
+    {96, "SectionedSgaussFilterNoPad"},
+    {97, "SectionedSgaussFilter2PctPad"},
+    {98, "SectionedSgaussFilter5PctPad"},
+
     // Sort
     {100, "Sort"},
   };
@@ -1481,6 +1782,39 @@ int main(int argc, char * argv[]) {
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
+
+  a = 95;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, -1>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+  a = 96;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+  a = 97;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 2>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+  a = 98;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 5>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
 
   // Sort ----------------------------------------------------------
   a = 100;
