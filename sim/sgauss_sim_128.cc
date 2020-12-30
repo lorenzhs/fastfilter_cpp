@@ -27,7 +27,7 @@ struct GaussData {
     uint32_t pivot = 0;
     void Reset(uint64_t h, uint32_t len) {
         uint32_t addrs = len - 127 + front_smash + back_smash;
-        start = fastrange32((uint32_t)(h >> 32), addrs);
+        start = (uint32_t)fastrange64(h, addrs);
         start = std::max(start, front_smash);
         start -= front_smash;
         start = std::min(start, len - 128);
@@ -35,7 +35,7 @@ struct GaussData {
         // group start locations every 16 bits, with
         // each group < 1 in 10,000 chance of > 32 entries,
         // -> good for SIMD construction
-        start &= ~uint32_t{15};
+        //start &= ~uint32_t{15};
         assert(start < len - 127);
         //Not as good? row = h * 0x9e3779b97f4a7c13;
         //*
@@ -44,7 +44,15 @@ struct GaussData {
         row ^= h >> 47;
         row ^= __uint128_t{h} << (64 + 17);
         //Not as good? row |= 1;
-        row |= (__uint128_t{1} << 127);
+        //row |= (__uint128_t{1} << 127);
+        row |= 1;
+        row <<= (h & 7);
+        start &= ~uint32_t{7};
+        //*/
+        /*
+        __uint128_t a = __uint128_t{h} * 0x9e3779b97f4a7c13U;
+        __uint128_t b = __uint128_t{h} * 0xa4398ab94d038781U;
+        row = b ^ (a << 64) ^ (a >> 64);
         //*/
         /*
         // Not much different in construction time

@@ -1300,11 +1300,14 @@ int main(int argc, char * argv[]) {
 
     {90, "XorFuse8"},
 
-    {95, "SectionedSgaussFilterPack"},
-    {96, "SectionedSgaussFilterNoPad"},
-    {97, "SectionedSgaussFilter2PctPad"},
-    {98, "SectionedSgaussFilter5PctPad"},
-    {99, "SectionedSgaussFilter10PctPad"},
+    {92, "SectionedSgaussFilterPack"},
+    {93, "SectionedSgaussFilterNoPad"},
+    {94, "SectionedSgaussFilter2PctPad"},
+    {95, "SectionedSgaussFilter5PctPad"},
+    {96, "SectionedSgaussFilter10PctPad"},
+    {97, "SectionedSgaussFilter15PctPad"},
+    {98, "SectionedSgaussFilter20PctPad"},
+    {99, "SectionedSgaussFilter28PctPad"},
 
     // Sort
     {100, "Sort"},
@@ -1789,7 +1792,8 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
-  a = 95;
+  // SectionedSGaussFilter
+  a = 92;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           SectionedSGaussFilter<uint8_t, 8, uint32_t, -1>>(
@@ -1797,7 +1801,7 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
-  a = 96;
+  a = 93;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           SectionedSGaussFilter<uint8_t, 8, uint32_t, 0>>(
@@ -1805,7 +1809,7 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
-  a = 97;
+  a = 94;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           SectionedSGaussFilter<uint8_t, 8, uint32_t, 2>>(
@@ -1813,7 +1817,7 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
-  a = 98;
+  a = 95;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           SectionedSGaussFilter<uint8_t, 8, uint32_t, 5>>(
@@ -1821,10 +1825,34 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
-  a = 99;
+  a = 96;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           SectionedSGaussFilter<uint8_t, 8, uint32_t, 10>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+  a = 97;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 15>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+  a = 98;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 20>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+  a = 99;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          SectionedSGaussFilter<uint8_t, 8, uint32_t, 28>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
