@@ -372,8 +372,17 @@ public:
 
   void AddAll(const vector<uint64_t> keys, const size_t start, const size_t end) {
     size_t add_count = end - start;
-    double factor = sizeof(CoeffType) == 16 ? 1.045 : 1.095;
-    size_t num_slots = (size_t)(add_count * factor);
+    double overhead = kMilliBitsPerKey < 4000 ? 0.033 : 0.046;
+    if (sizeof(CoeffType) == 8) {
+      overhead *= 2;
+    } else if (sizeof(CoeffType) == 4) {
+      overhead *= 4;
+    } else if (sizeof(CoeffType) == 2) {
+      overhead *= 8;
+    } else {
+      assert(sizeof(CoeffType) == 16);
+    }
+    size_t num_slots = (size_t)(add_count * (1.0 + overhead));
     num_slots = InterleavedSoln::RoundUpNumSlots(num_slots);
     Banding b(num_slots);
     (void)b.AddRange(keys.begin() + start, keys.begin() + end);
@@ -1226,9 +1235,33 @@ Statistics FilterBenchmark(
 #endif
     const auto start_time = NowNanos();
     found_count = 0;
+#ifndef NEW_CONTAINS_BENCHMARK
     for (const auto v : to_lookup_mixed) {
       found_count += FilterAPI<Table>::Contain(v, &filter);
     }
+#else
+    auto lower = to_lookup_mixed.begin();
+    auto upper = to_lookup_mixed.end();
+    while (lower != upper) {
+      while (FilterAPI<Table>::Contain(*(lower++), &filter)) {
+        ++found_count;
+        if (lower == upper) {
+          goto lower_neq_upper;
+        }
+      }
+      if (lower == upper) {
+        goto lower_neq_upper;
+      }
+      while (FilterAPI<Table>::Contain(*(--upper), &filter)) {
+        ++found_count;
+        if (lower == upper) {
+          goto lower_neq_upper;
+        }
+      }
+    }
+    lower_neq_upper:
+#endif
+
     const auto lookup_time = NowNanos() - start_time;
 #ifdef WITH_LINUX_EVENTS
     unified.end(results);
@@ -1369,10 +1402,18 @@ int main(int argc, char * argv[]) {
     {63, "SuccCountBlockBloomRank10"},
 
     {70, "Xor8-singleheader"},
-    {80, "Morton"},
+    {71, "Xor3 (NBitArray)"},
+    {72, "Xor7 (NBitArray)"},
+    {79, "Morton"},
 
-    {86, "HomogRibbon64"},
-    {87, "HomogRibbon128"},
+    {80, "HomogRibbon16_3"},
+    {81, "HomogRibbon32_3"},
+    {82, "HomogRibbon64_3"},
+    {83, "HomogRibbon128_3"},
+    {84, "HomogRibbon16_7"},
+    {85, "HomogRibbon32_7"},
+    {86, "HomogRibbon64_7"},
+    {87, "HomogRibbon128_7"},
 
     {90, "XorFuse8"},
 
@@ -1850,8 +1891,22 @@ int main(int argc, char * argv[]) {
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
+  a = 71;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilter2<uint64_t, uint8_t, NBitArray<uint8_t, 3>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 72;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilter2<uint64_t, uint8_t, NBitArray<uint8_t, 7>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
-  a = 80;
+  a = 79;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           MortonFilter>(
@@ -1860,18 +1915,59 @@ int main(int argc, char * argv[]) {
   }
 
   // Homogeneous Ribbon
-  a = 86;
+  a = 80;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
-          HomogRibbonFilter<uint64_t, /*millibits per key*/ 8912>>(
+          HomogRibbonFilter<uint16_t, /*millibits per key*/ 3800>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
-
+  a = 81;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint32_t, /*millibits per key*/ 3400>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 82;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint64_t, /*millibits per key*/ 3200>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 83;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<Unsigned128, /*millibits per key*/ 3100>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 84;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint16_t, /*millibits per key*/ 9800>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 85;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint32_t, /*millibits per key*/ 8400>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 86;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint64_t, /*millibits per key*/ 7700>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
   a = 87;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
-          HomogRibbonFilter<Unsigned128, /*millibits per key*/ 8456>>(
+          HomogRibbonFilter<Unsigned128, /*millibits per key*/ 7350>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
