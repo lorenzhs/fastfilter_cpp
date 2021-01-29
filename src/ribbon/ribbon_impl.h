@@ -1276,42 +1276,31 @@ class BalancedBanding
       return false;
     }
     const int log2_vshards = this->log2_vshards_;
-    const Index max_to_vshard = (num_slots >> log2_vshards) + kCoeffBits;
+    const Index max_to_vshard = (count_ >> log2_vshards) + 25 + kCoeffBits/3;
     banding_.Reset(num_slots, /*backtrack size*/ max_to_vshard);
 
     const Index vshards = Index{1} << log2_vshards;
     const Index vshards_mask = vshards - 1;
     std::unique_ptr<Index[]> added_to_vshards(new Index[vshards]{});
 
-    // Index rem_entries_overall = static_cast<Index>(count_);
     for (int level = 0; level <= log2_vshards; ++level) {
       Index level_vshard_begin = (~vshards_mask >> level) & vshards_mask;
       Index level_vshard_end =
           level_vshard_begin +
           (Index{1} << std::max(0, log2_vshards - 1 - level));
 
-      // Index rem_slots_overall = static_cast<Index>((uint64_t{vshards -
-      // vshard} * num_slots) >> this->log2_vshards_); if (rem_entries_overall >
-      // rem_slots_overall) {
-      //  return false;
-      //}
-      // fprintf(stderr, "Level %u [%u,%u)\n", (unsigned)level,
-      // (unsigned)level_vshard_begin, (unsigned)level_vshard_end);
-
       for (Index bucket = 0; bucket < kBitsPerVshard; ++bucket) {
         for (Index vshard = level_vshard_begin; vshard < level_vshard_end;
              ++vshard) {
           Index& vshard_added = added_to_vshards[vshard];
-          // fprintf(stderr, "Vshard %u starting rem %u\n", (unsigned)vshard,
-          //        (unsigned)rem_vshard);
           const std::deque<Hash>& entries = vshard_buckets_[vshard][bucket];
           if (vshard_added + entries.size() <= max_to_vshard &&
               banding_.AddRangeOrRollBack(entries.begin(), entries.end())) {
             vshard_added += entries.size();
             /*
             fprintf(stderr, "Added %zu from vshard %u bucket %u\n",
-            entries.size(), (unsigned)vshard, (unsigned)bucket);
-                    */
+                    entries.size(), (unsigned)vshard, (unsigned)bucket);
+            */
           } else {
             // bump, recording that fact
             size_t bit_index = vshard * kBitsPerVshard + bucket;
@@ -1333,20 +1322,30 @@ class BalancedBanding
             */
           }
           /*
-        if (bucket == kBitsPerVshard - 1) {
-          fprintf(stderr, "Vshard %u added %u / %g\n", (unsigned)vshard,
-                  (unsigned)vshard_added,
-                  (double)num_slots / vshards);
-        }
-                  */
+          if (bucket == kBitsPerVshard - 1) {
+            fprintf(stderr, "Vshard %u added %u / %g\n", (unsigned)vshard,
+                    (unsigned)vshard_added,
+                    (double)num_slots / vshards);
+          }
+          */
         }
       }
+      /*
+      Index level_added = 0;
+      for (Index vshard = level_vshard_begin; vshard < level_vshard_end;
+             ++vshard) {
+        level_added += added_to_vshards[vshard];
+      }
+      fprintf(stderr, "Level %u average added %g\n", (unsigned)level, 1.0 * level_added / (level_vshard_end - level_vshard_begin));
+      */
     }
+    /*
     Index total_added = 0;
     for (Index vshard = 0; vshard < vshards; ++vshard) {
       total_added += added_to_vshards[vshard];
     }
-    //fprintf(stderr, "Total added: %u\n", (unsigned)total_added);
+    fprintf(stderr, "Total added: %u\n", (unsigned)total_added);
+    */
     return true;
   }
 
