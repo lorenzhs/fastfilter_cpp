@@ -456,7 +456,7 @@ public:
   }
 
   BalancedRibbonFilter(size_t add_count)
-      : log2_vshards((uint32_t)std::max(FloorLog2(add_count + add_count / 3) - (10 + (int)sizeof(CoeffType)/10), 0)),
+      : log2_vshards((uint32_t)std::max(FloorLog2(add_count + add_count / 3 + add_count / 13) - (10 + (int)sizeof(CoeffType)/10), 0)),
         num_slots(GetNumSlots(add_count, log2_vshards)),
         bytes((num_slots * kNumColumns + 7) / 8),
         ptr(new char[bytes]),
