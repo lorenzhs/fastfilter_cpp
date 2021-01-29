@@ -1283,15 +1283,38 @@ class BalancedBanding
     const Index vshards_mask = vshards - 1;
     std::unique_ptr<Index[]> added_to_vshards(new Index[vshards]{});
 
+    // Iterating by vshards in order has the problem that adding small
+    // buckets in vshard i could interfere with adding larger buckets
+    // in vshard i+1, due to natural spill-over up to ribbon width.
+    // So we make sure to try larger bucket in i+1 before next smaller
+    // bucket in i, etc. but still with good locality and finishing the
+    // whole of each level before proceeding to next level (for best
+    // chance of add on bump).
+
     for (int level = 0; level <= log2_vshards; ++level) {
       Index level_vshard_begin = (~vshards_mask >> level) & vshards_mask;
       Index level_vshard_end =
           level_vshard_begin +
           (Index{1} << std::max(0, log2_vshards - 1 - level));
 
-      for (Index bucket = 0; bucket < kBitsPerVshard; ++bucket) {
-        for (Index vshard = level_vshard_begin; vshard < level_vshard_end;
-             ++vshard) {
+      Index imax = level_vshard_end + kBitsPerVshard - 1;
+      for (Index i = level_vshard_begin; i < imax; ++i) {
+        Index bmin = std::max((int)i - (int)level_vshard_end + 1, 0);
+        Index bmax = std::min(i + 1 - level_vshard_begin, kBitsPerVshard);
+        // NOTE: prefetching doesn't seem to help
+        if (false && bmin == 0) {
+          Index cur_slot = (i * num_slots) >> log2_vshards;
+          Index end_slot = ((i + 1) * num_slots) >> log2_vshards;
+          do {
+            banding_.Prefetch(cur_slot);
+            cur_slot += CACHE_LINE_SIZE / sizeof(CoeffRow);
+          } while (cur_slot < end_slot);
+        }
+        for (Index bucket = bmin; bucket < bmax; ++bucket) {
+          Index vshard = i - bucket;
+          assert(vshard >= level_vshard_begin);
+          assert(vshard < level_vshard_end);
+
           Index& vshard_added = added_to_vshards[vshard];
           const std::deque<Hash>& entries = vshard_buckets_[vshard][bucket];
           if (vshard_added + entries.size() <= max_to_vshard &&
