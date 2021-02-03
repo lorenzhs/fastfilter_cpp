@@ -8,6 +8,9 @@ CXXFLAGS += -fno-strict-aliasing -Wall -std=c++11 -I. -I../src/ \
     $(OPT)
 
 UNAME_P := $(shell uname -p)
+ifneq ($(AVX512),)
+	CXXFLAGS += -march=skylake-avx512
+else
 ifeq ($(UNAME_P),aarch64)
         CXXFLAGS +=
 else
@@ -15,7 +18,7 @@ ifeq ($(UNAME_P),unknown)
         CXXFLAGS +=
 else
 	CXXFLAGS += -march=native
-#	CXXFLAGS += -march=skylake-avx512
+endif
 endif
 endif
 ifneq ($(STATIC),)

@@ -14,4 +14,6 @@ constexpr bool kLittleEndian = true;
 
 #define PREFETCH(addr, rw, locality) __builtin_prefetch(addr, rw, locality)
 
+#define HAVE_AVX2 __AVX2__
+
 }  // namespace port

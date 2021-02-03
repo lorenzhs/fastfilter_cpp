@@ -78,7 +78,7 @@ class CuckooFilterStable {
     // where y is 1..bucketCount - 1 and odd -
     // that way, bucket2 is never the original bucket,
     // and running this twice will give the original bucket, as needed
-    uint32_t r = (reduce(hash, bucketCount >> 1) << 1) + 1;
+    uint32_t r = reduce(hash, bucketCount) | 1;
 
     // this is needed because the bucket size is not always 2^n:
     int32_t b2 = bucketCount - index - r;
