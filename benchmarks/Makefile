@@ -15,6 +15,7 @@ ifeq ($(UNAME_P),unknown)
         CXXFLAGS +=
 else
 	CXXFLAGS += -march=native
+#	CXXFLAGS += -march=skylake-avx512
 endif
 endif
 ifneq ($(STATIC),)

@@ -102,7 +102,7 @@ string StatisticsTableHeader(int type_width, const std::vector<double> &found_pr
     os << setw(8) << "find";
   }
   os << setw(8) << "1Xadd+";
-  os << setw(9) << "" << setw(11) << "" << setw(11)
+  os << setw(8) << "" << setw(11) << "" << setw(11)
      << "optimal" << setw(8) << "wasted" << setw(8) << "million" << endl;
 
   os << string(type_width, ' ');
@@ -112,8 +112,8 @@ string StatisticsTableHeader(int type_width, const std::vector<double> &found_pr
     os << setw(8 - 1) << static_cast<int>(prob * 100.0) << '%';
   }
   os << setw(8 - 5) << found_probabilities.size() << "Xfind";
-  os << setw(10) << "ε" << setw(11) << "bits/item" << setw(11)
-     << "bits/item" << setw(8) << "space" << setw(8) << "keys";
+  os << setw(9) << "ε%" << setw(11) << "bits/item" << setw(11)
+     << "bits/item" << setw(8) << "space%" << setw(8) << "keys";
   return os.str();
 }
 
@@ -135,14 +135,14 @@ basic_ostream<CharT, Traits>& operator<<(
   // we get some nonsensical result for very small fpps
   if(stats.false_positive_probabilty > 0.0000001) {
     const auto minbits = log2(1 / stats.false_positive_probabilty);
-    os << setw(8) << setprecision(4) << stats.false_positive_probabilty * 100 << '%'
+    os << setw(8) << setprecision(4) << stats.false_positive_probabilty * 100
        << setw(11) << setprecision(2) << stats.bits_per_item << setw(11) << minbits
-       << setw(7) << setprecision(1) << 100 * (stats.bits_per_item / minbits - 1) << '%'
+       << setw(8) << setprecision(1) << 100 * (stats.bits_per_item / minbits - 1)
        << setw(8) << setprecision(1) << (stats.add_count / 1000000.);
   } else {
-    os << setw(8) << setprecision(4) << stats.false_positive_probabilty * 100 << '%'
+    os << setw(8) << setprecision(4) << stats.false_positive_probabilty * 100
        << setw(11) << setprecision(2) << stats.bits_per_item << setw(11) << 64
-       << setw(7) << setprecision(1) << 0 << '%'
+       << setw(8) << setprecision(1) << 0
        << setw(8) << setprecision(1) << (stats.add_count / 1000000.);
   }
   return os;
@@ -372,8 +372,11 @@ class HomogRibbonFilter {
   InterleavedSoln soln;
   Hasher hasher;
 public:
+  static constexpr double kFractionalCols =
+    kNumColumns == 0 ? 7.7 : kNumColumns;
+
   static double GetBestOverheadFactor() {
-    double overhead = 0.03 + 0.002 * kNumColumns;
+    double overhead = 0.03 + 0.002 * kFractionalCols;
     if (sizeof(CoeffType) == 8) {
       overhead *= 2;
     } else if (sizeof(CoeffType) == 4) {
@@ -388,7 +391,7 @@ public:
 
   HomogRibbonFilter(size_t add_count)
       : num_slots(InterleavedSoln::RoundUpNumSlots((size_t)(GetBestOverheadFactor() * add_count))),
-        bytes((num_slots * kNumColumns + 7) / 8),
+        bytes(static_cast<size_t>((num_slots * kFractionalCols + 7) / 8)),
         ptr(new char[bytes]),
         soln(ptr.get(), bytes) {}
 
@@ -442,12 +445,15 @@ class BalancedRibbonFilter {
   unique_ptr<char[]> meta_ptr;
   BalancedHasher hasher;
 public:
+  static constexpr double kFractionalCols =
+    kNumColumns == 0 ? 7.7 : kNumColumns;
+
   static double GetNumSlots(size_t add_count, uint32_t log2_vshards) {
     size_t add_per_vshard = add_count >> log2_vshards;
 
     double overhead;
     if (sizeof(CoeffType) == 8) {
-      overhead = 0.0000052 * add_per_vshard;
+      overhead = 0.0000055 * add_per_vshard; // FIXME?
     } else if (sizeof(CoeffType) == 4) {
       overhead = 0.00005 * add_per_vshard;
     } else if (sizeof(CoeffType) == 2) {
@@ -457,13 +463,13 @@ public:
       overhead = 0.0000013 * add_per_vshard;
     }
     overhead = std::max(overhead, 0.01 * kMinPctOverhead);
-    return InterleavedSoln::RoundUpNumSlots((size_t)(add_count + overhead * add_count));
+    return InterleavedSoln::RoundUpNumSlots((size_t)(add_count + overhead * add_count + add_per_vshard / 5));
   }
 
   BalancedRibbonFilter(size_t add_count)
       : log2_vshards((uint32_t)std::max(FloorLog2(add_count + add_count / 3 + add_count / 13) - (10 + (int)sizeof(CoeffType)/10), 0)),
         num_slots(GetNumSlots(add_count, log2_vshards)),
-        bytes((num_slots * kNumColumns + 7) / 8),
+        bytes(static_cast<size_t>((num_slots * kFractionalCols + 7) / 8)),
         ptr(new char[bytes]),
         soln(ptr.get(), bytes),
         meta_bytes(BalancedHasher(log2_vshards, nullptr).GetMetadataLength()),
@@ -491,6 +497,74 @@ public:
 template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead>
 struct FilterAPI<BalancedRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>> {
   using Table = BalancedRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>;
+  static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
+  static void Add(uint64_t key, Table* table) {
+    throw std::runtime_error("Unsupported");
+  }
+  static void AddAll(const vector<uint64_t> keys, const size_t start, const size_t end, Table* table) {
+    table->AddAll(keys, start, end);
+  }
+  static void Remove(uint64_t key, Table * table) {
+    throw std::runtime_error("Unsupported");
+  }
+  CONTAIN_ATTRIBUTES static bool Contain(uint64_t key, const Table * table) {
+    return table->Contain(key);
+  }
+};
+
+template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead>
+class StandardRibbonFilter {
+  using TS = RibbonTS<CoeffType, /*kHomog*/ false, kNumColumns>;
+  IMPORT_RIBBON_IMPL_TYPES(TS);
+
+  size_t num_slots;
+
+  size_t bytes;
+  unique_ptr<char[]> ptr;
+  InterleavedSoln soln;
+  Hasher hasher;
+public:
+  static constexpr double kFractionalCols =
+    kNumColumns == 0 ? 7.7 : kNumColumns;
+
+  static double GetNumSlots(size_t add_count) {
+    double overhead;
+    if (sizeof(CoeffType) == 8) {
+      overhead = -0.0251 + std::log(1.0 * add_count) * 1.4427 * 0.0083;
+    } else {
+      assert(sizeof(CoeffType) == 16);
+      overhead = -0.0176 + std::log(1.0 * add_count) * 1.4427 * 0.0038;
+    }
+    overhead = std::max(overhead, 0.01 * kMinPctOverhead);
+    return InterleavedSoln::RoundUpNumSlots((size_t)(add_count + overhead * add_count));
+  }
+
+  StandardRibbonFilter(size_t add_count)
+      : num_slots(GetNumSlots(add_count)),
+        bytes(static_cast<size_t>((num_slots * kFractionalCols + 7) / 8)),
+        ptr(new char[bytes]),
+        soln(ptr.get(), bytes)
+        {}
+
+  void AddAll(const vector<uint64_t> keys, const size_t start, const size_t end) {
+    Banding b(num_slots);
+    if (!b.AddRange(keys.begin() + start, keys.begin() + end)) {
+      fprintf(stderr, "Failed!\n");
+      return;
+    }
+    soln.BackSubstFrom(b);
+  }
+  bool Contain(uint64_t key) const {
+    return soln.FilterQuery(key, hasher);
+  }
+  size_t SizeInBytes() const {
+    return bytes;
+  }
+};
+
+template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead>
+struct FilterAPI<StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>> {
+  using Table = StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>;
   static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
   static void Add(uint64_t key, Table* table) {
     throw std::runtime_error("Unsupported");
@@ -1156,7 +1230,7 @@ int main(int argc, char * argv[]) {
     {0, "Xor8"}, {1, "Xor12"}, {2, "Xor16"},
     {3, "Xor+8"}, {4, "Xor+16"},
     {5, "Xor10"}, {6, "Xor10.666"},
-    {7, "Xor10 (NBitArray)"}, {8, "Xor14 (NBitArray)"}, {9, "Xor8-2^n"},
+    {7, "Xor10(NBitArray)"}, {8, "Xor14(NBitArray)"}, {9, "Xor8-2^n"},
     // Cuckooo
     {10,"Cuckoo8"}, {11,"Cuckoo12"}, {12,"Cuckoo16"},
     {13,"CuckooSemiSort13"},
@@ -1170,18 +1244,18 @@ int main(int argc, char * argv[]) {
 #endif
     // Bloom
     {40, "Bloom8"}, {41, "Bloom12" }, {42, "Bloom16"},
-    {43, "Bloom8 (addall)"}, {44, "Bloom12 (addall)"}, {45, "Bloom16 (addall)"},
-    {46, "BranchlessBloom8 (addall)"},
-    {47, "BranchlessBloom12 (addall)"},
-    {48, "BranchlessBloom16 (addall)"},
+    {43, "Bloom8(addall)"}, {44, "Bloom12(addall)"}, {45, "Bloom16(addall)"},
+    {46, "BranchlessBloom8(addall)"},
+    {47, "BranchlessBloom12(addall)"},
+    {48, "BranchlessBloom16(addall)"},
     // Blocked Bloom
     {50, "SimpleBlockedBloom"},
 #ifdef __aarch64__
     {51, "BlockedBloom"},
-    {52, "BlockedBloom (addall)"},
+    {52, "BlockedBloom(addall)"},
 #elif defined( __AVX2__)
     {51, "BlockedBloom"},
-    {52, "BlockedBloom (addall)"},
+    {52, "BlockedBloom(addall)"},
     {53, "BlockedBloom64"},
 #endif
 #ifdef __SSE41__
@@ -1189,20 +1263,34 @@ int main(int argc, char * argv[]) {
 #endif
 
     // Counting Bloom
-    {60, "CountingBloom10 (addall)"},
-    {61, "SuccCountingBloom10 (addall)"},
+    {60, "CountingBloom10(addall)"},
+    {61, "SuccCountingBloom10(addall)"},
     {62, "SuccCountBlockBloom10"},
     {63, "SuccCountBlockBloomRank10"},
 
     {70, "Xor8-singleheader"},
-    {71, "Xor1 (NBitArray)"},
-    {73, "Xor3 (NBitArray)"},
-    {77, "Xor7 (NBitArray)"},
-    {79, "Xor11 (NBitArray)"},
-
-    {80, "Morton"},
 
     {90, "XorFuse8"},
+
+    {101, "Xor1(NBitArray)"},
+    {103, "Xor3(NBitArray)"},
+    {105, "Xor5(NBitArray)"},
+    {107, "Xor7(NBitArray)"},
+    {109, "Xor9(NBitArray)"},
+    {111, "Xor11(NBitArray)"},
+    {113, "Xor13(NBitArray)"},
+    {115, "Xor15(NBitArray)"},
+
+/* TODO?
+    {201, "Xor+1(NBitArray)"},
+    {203, "Xor+3(NBitArray)"},
+    {205, "Xor+5(NBitArray)"},
+    {207, "Xor+7(NBitArray)"},
+    {209, "Xor+9(NBitArray)"},
+    {211, "Xor+11(NBitArray)"},
+    {213, "Xor+13(NBitArray)"},
+    {215, "Xor+15(NBitArray)"},
+*/
 
     {1014, "HomogRibbon16_1"},
     {1015, "HomogRibbon32_1"},
@@ -1224,11 +1312,17 @@ int main(int argc, char * argv[]) {
     {1115, "HomogRibbon32_11"},
     {1116, "HomogRibbon64_11"},
     {1117, "HomogRibbon128_11"},
+    {1774, "HomogRibbon16_7.7"},
+    {1775, "HomogRibbon32_7.7"},
+    {1776, "HomogRibbon64_7.7"},
+    {1777, "HomogRibbon128_7.7"},
 
     {2015, "BalancedRibbon32Pack_1"},
     {2016, "BalancedRibbon64Pack_1"},
     {2035, "BalancedRibbon32Pack_3"},
     {2036, "BalancedRibbon64Pack_3"},
+    {2055, "BalancedRibbon32Pack_5"},
+    {2056, "BalancedRibbon64Pack_5"},
     {2071, "BalancedRibbon32_25PctPad_7"},
     {2072, "BalancedRibbon32_20PctPad_7"},
     {2073, "BalancedRibbon32_15PctPad_7"},
@@ -1236,12 +1330,45 @@ int main(int argc, char * argv[]) {
     {2075, "BalancedRibbon32Pack_7"},
     {2076, "BalancedRibbon64Pack_7"},
     {2077, "BalancedRibbon128Pack_7"},
+    {2095, "BalancedRibbon32Pack_9"},
+    {2096, "BalancedRibbon64Pack_9"},
     {2115, "BalancedRibbon32Pack_11"},
     {2116, "BalancedRibbon64Pack_11"},
+    {2135, "BalancedRibbon32Pack_13"},
+    {2136, "BalancedRibbon64Pack_13"},
+    {2155, "BalancedRibbon32Pack_15"},
+    {2156, "BalancedRibbon64Pack_15"},
+    {2775, "BalancedRibbon32Pack_7.7"},
+    {2776, "BalancedRibbon64Pack_7.7"},
 
+    {3016, "StandardRibbon64_1"},
+    {3017, "StandardRibbon128_1"},
+    {3036, "StandardRibbon64_3"},
+    {3037, "StandardRibbon128_3"},
+    {3056, "StandardRibbon64_5"},
+    {3057, "StandardRibbon128_5"},
+    {3072, "StandardRibbon64_25PctPad_7"},
+    {3073, "StandardRibbon64_20PctPad_7"},
+    {3074, "StandardRibbon64_15PctPad_7"},
+    {3075, "StandardRibbon64_10PctPad_7"},
+    {3076, "StandardRibbon64_7"},
+    {3077, "StandardRibbon128_7"},
+    {3096, "StandardRibbon64_9"},
+    {3097, "StandardRibbon128_9"},
+    {3116, "StandardRibbon64_11"},
+    {3117, "StandardRibbon128_11"},
+    {3136, "StandardRibbon64_13"},
+    {3137, "StandardRibbon128_13"},
+    {3156, "StandardRibbon64_15"},
+    {3157, "StandardRibbon128_15"},
+    {3776, "StandardRibbon64_7.7"},
+    {3777, "StandardRibbon128_7.7"},
 
     // Sort
-    {9999, "Sort"},
+    {9000, "Sort"},
+
+    // At the end because it tends to crash
+    {9800, "Morton"},
   };
 
   // Parameter Parsing ----------------------------------------------------------
@@ -1708,48 +1835,70 @@ int main(int argc, char * argv[]) {
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
 
-  a = 71;
+  // Xor Fuse Filter ----------------------------------------------------------
+  a = 90;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFuseFilter<uint64_t, uint8_t>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+
+
+  // Specific Xor bit widths
+  a = 101;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           XorFilter2<uint64_t, uint8_t, NBitArray<uint8_t, 1>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
-  a = 73;
+  a = 103;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           XorFilter2<uint64_t, uint8_t, NBitArray<uint8_t, 3>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
-  a = 77;
+  a = 105;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilter2<uint64_t, uint8_t, NBitArray<uint8_t, 5>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 107;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           XorFilter2<uint64_t, uint8_t, NBitArray<uint8_t, 7>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
-  a = 79;
+  a = 109;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilter2<uint64_t, uint16_t, NBitArray<uint16_t, 9>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 111;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           XorFilter2<uint64_t, uint16_t, NBitArray<uint16_t, 11>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
-
-  a = 80;
+  a = 113;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
-          MortonFilter>(
+          XorFilter2<uint64_t, uint16_t, NBitArray<uint16_t, 13>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
-
-  // Xor Fuse Filter ----------------------------------------------------------
-  a = 90;
-  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+  a = 115;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
-          XorFuseFilter<uint64_t, uint8_t>>(
+          XorFilter2<uint64_t, uint16_t, NBitArray<uint16_t, 15>, SimpleMixSplit>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
@@ -1895,6 +2044,34 @@ int main(int argc, char * argv[]) {
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
+  a = 1774;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint16_t, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 1775;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint32_t, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 1776;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<uint64_t, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 1777;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          HomogRibbonFilter<Unsigned128, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
   // BalancedRibbon
   a = 2015;
@@ -1922,6 +2099,20 @@ int main(int argc, char * argv[]) {
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           BalancedRibbonFilter<uint64_t, 3, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2055;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint32_t, 5, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2056;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint64_t, 5, 0>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
@@ -1974,6 +2165,20 @@ int main(int argc, char * argv[]) {
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
+  a = 2095;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint32_t, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2096;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint64_t, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
   a = 2115;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
@@ -1988,13 +2193,207 @@ int main(int argc, char * argv[]) {
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
+  a = 2135;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint32_t, 13, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2136;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint64_t, 13, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2155;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint32_t, 15, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2156;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint64_t, 15, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2775;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint32_t, 0, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 2776;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          BalancedRibbonFilter<uint64_t, 0, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
-
-
-
+  // StandardRibbon
+  a = 3016;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 1, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3017;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 1, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3036;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 3, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3037;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 3, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3056;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 5, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3057;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 5, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3072;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 25>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3073;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 20>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3074;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 15>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3075;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 10>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3076;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3077;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3096;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3097;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3116;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 11, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3117;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 11, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3136;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 13, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3137;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 13, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3156;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 15, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3157;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 15, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3776;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 0, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3777;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 0, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
   // Sort ----------------------------------------------------------
-  a = 9999;
+  a = 9000;
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto start_time = NowNanos();
       std::sort(to_add.begin(), to_add.end());
@@ -2002,5 +2401,12 @@ int main(int argc, char * argv[]) {
       std::cout << "Sort time: " << sort_time / to_add.size() << " ns/key\n";
   }
 
+  a = 9800;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          MortonFilter>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
 }
