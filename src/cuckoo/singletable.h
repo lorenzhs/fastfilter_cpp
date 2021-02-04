@@ -37,7 +37,7 @@ class SingleTable {
     memset(buckets_, 0, kBytesPerBucket * (num_buckets_ + kPaddingBuckets));
   }
 
-  ~SingleTable() { 
+  ~SingleTable() {
     delete[] buckets_;
   }
 
@@ -45,12 +45,12 @@ class SingleTable {
     return num_buckets_;
   }
 
-  size_t SizeInBytes() const { 
-    return kBytesPerBucket * num_buckets_; 
+  size_t SizeInBytes() const {
+    return kBytesPerBucket * num_buckets_;
   }
 
-  size_t SizeInTags() const { 
-    return kTagsPerBucket * num_buckets_; 
+  size_t SizeInTags() const {
+    return kTagsPerBucket * num_buckets_;
   }
 
   std::string Info() const {
@@ -83,6 +83,8 @@ class SingleTable {
       tag = *((uint16_t *)p);
     } else if (bits_per_tag == 32) {
       tag = ((uint32_t *)p)[j];
+    } else {
+      tag = (uint32_t)(*((uint64_t *)p) >> (j * bits_per_tag));
     }
     return tag & kTagMask;
   }
@@ -118,6 +120,9 @@ class SingleTable {
       ((uint16_t *)p)[j] = tag;
     } else if (bits_per_tag == 32) {
       ((uint32_t *)p)[j] = tag;
+    } else {
+      *((uint64_t *)p) &= ~(uint64_t{kTagMask} << (j * bits_per_tag));
+      *((uint64_t *)p) |= uint64_t{tag} << (j * bits_per_tag);
     }
   }
 
