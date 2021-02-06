@@ -369,12 +369,12 @@ struct FilterAPI<XorFuseFilter<ItemType, FingerprintType>> {
   }
 };
 
-template <typename CoeffType, bool kHomog, uint32_t kNumColumns>
+template <typename CoeffType, bool kHomog, uint32_t kNumColumns, bool kSmash = false>
 struct RibbonTS {
   static constexpr bool kIsFilter = true;
   static constexpr bool kHomogeneous = kHomog;
   static constexpr bool kFirstCoeffAlwaysOne = true;
-  static constexpr bool kUseSmash = false;
+  static constexpr bool kUseSmash = kSmash;
   using CoeffRow = CoeffType;
   using Hash = uint64_t;
   using Key = uint64_t;
@@ -406,16 +406,7 @@ public:
     kNumColumns == 0 ? 7.7 : kNumColumns;
 
   static double GetBestOverheadFactor() {
-    double overhead = 0.03 + 0.002 * kFractionalCols;
-    if (sizeof(CoeffType) == 8) {
-      overhead *= 2;
-    } else if (sizeof(CoeffType) == 4) {
-      overhead *= 4;
-    } else if (sizeof(CoeffType) == 2) {
-      overhead *= 8;
-    } else {
-      assert(sizeof(CoeffType) == 16);
-    }
+    double overhead = (4.0 + kFractionalCols * 0.25) / (8.0 * sizeof(CoeffType));
     return 1.0 + overhead;
   }
 
@@ -542,9 +533,9 @@ struct FilterAPI<BalancedRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>> 
   }
 };
 
-template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead>
+template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead, bool kUseSmash = false>
 class StandardRibbonFilter {
-  using TS = RibbonTS<CoeffType, /*kHomog*/ false, kNumColumns>;
+  using TS = RibbonTS<CoeffType, /*kHomog*/ false, kNumColumns, kUseSmash>;
   IMPORT_RIBBON_IMPL_TYPES(TS);
 
   size_t num_slots;
@@ -592,9 +583,9 @@ public:
   }
 };
 
-template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead>
-struct FilterAPI<StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>> {
-  using Table = StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead>;
+template <typename CoeffType, uint32_t kNumColumns, uint32_t kMinPctOverhead, bool kUseSmash>
+struct FilterAPI<StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead, kUseSmash>> {
+  using Table = StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead, kUseSmash>;
   static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
   static void Add(uint64_t key, Table* table) {
     throw std::runtime_error("Unsupported");
@@ -1270,10 +1261,10 @@ Statistics FilterBenchmark(
       uint64_t positives = found_count  - intersectionsize;
       uint64_t samples = to_lookup_mixed.size() - intersectionsize;
 
-      if (positives * samples < 1000000000U) {
+      if (positives * samples < 10000000000ULL) {
         //cerr << "NOTE: getting more samples for accurate FP rate" << endl;
         mt19937_64 rnd(start_time);
-        while (positives * samples < 1000000000U) {
+        while (positives * samples < 10000000000ULL) {
           // Need more samples for accurate FP rate
           positives += FilterAPI<Table>::Contain(rnd(), &filter);
           samples++;
@@ -1507,6 +1498,10 @@ int main(int argc, char * argv[]) {
     {3075, "StandardRibbon64_10PctPad_7"},
     {3076, "StandardRibbon64_7"},
     {3077, "StandardRibbon128_7"},
+    {3086, "StandardRibbon64_8"},
+    {3087, "StandardRibbon128_8"},
+    {3088, "StandardRibbon64_8_Smash"},
+    {3089, "StandardRibbon128_8_Smash"},
     {3096, "StandardRibbon64_9"},
     {3097, "StandardRibbon128_9"},
     {3116, "StandardRibbon64_11"},
@@ -1590,10 +1585,10 @@ int main(int argc, char * argv[]) {
   // Generating Samples ----------------------------------------------------------
 
   vector<uint64_t> to_add = seed == -1 ?
-      GenerateRandom64Fast(add_count, rand()) :
+      GenerateRandom64Fast(add_count, NowNanos()) :
       GenerateRandom64Fast(add_count, seed);
   vector<uint64_t> to_lookup = seed == -1 ?
-      GenerateRandom64Fast(actual_sample_size, rand()) :
+      GenerateRandom64Fast(actual_sample_size, NowNanos()) :
       GenerateRandom64Fast(actual_sample_size, seed + add_count);
 
   if (seed >= 0 && seed < 64) {
@@ -2678,6 +2673,34 @@ int main(int argc, char * argv[]) {
   if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
           StandardRibbonFilter<Unsigned128, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3086;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3087;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 7, 0>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3088;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<uint64_t, 7, 0, true>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 3089;
+  if (algorithmId == a || algorithmId < 0 || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          StandardRibbonFilter<Unsigned128, 7, 0, true>>(
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
