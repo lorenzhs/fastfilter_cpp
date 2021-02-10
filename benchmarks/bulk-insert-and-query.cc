@@ -34,6 +34,7 @@
 #include "xorfilter_2.h"
 #include "xorfilter_2n.h"
 #include "xorfilter_plus.h"
+#include "xorfilter_plus2.h"
 #include "xorfilter_singleheader.h"
 #include "xor_fuse_filter.h"
 #include "bloom.h"
@@ -57,6 +58,7 @@ using namespace xorfilter;
 using namespace xorfilter2;
 using namespace xorfilter2n;
 using namespace xorfilter_plus;
+using namespace xorfilter_plus2;
 using namespace xorfusefilter;
 using namespace bloomfilter;
 using namespace counting_bloomfilter;
@@ -488,7 +490,7 @@ public:
   }
 
   BalancedRibbonFilter(size_t add_count)
-      : log2_vshards((uint32_t)std::max(FloorLog2(add_count + add_count / 3 + add_count / 13) - (10 + (int)sizeof(CoeffType)/10), 0)),
+      : log2_vshards((uint32_t)FloorLog2((add_count + add_count / 3 + add_count / 13) / (128 * sizeof(CoeffType)))),
         num_slots(GetNumSlots(add_count, log2_vshards)),
         bytes(static_cast<size_t>((num_slots * kFractionalCols + 7) / 8)),
         ptr(new char[bytes]),
@@ -601,30 +603,38 @@ struct FilterAPI<StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead, k
   }
 };
 
-template <int kProbesPerBlock, int kBlocks>
+template <int kProbes, int kBlocks>
 class RocksBloomFilter {
   size_t bytes;
   unique_ptr<char[]> ptr;
 
 public:
   static double GetBestBpkForProbes() {
-    switch (kProbesPerBlock) {
-      case 1: return 1.44;
-      // Based roughly on ChooseNumProbes
-      case 2: return 2.83;
-      case 3: return 4.34;
-      case 4: return 5.87;
-      case 5: return 7.47;
-      case 6: return 9.19;
-      case 7: return 10.90;
-      case 8: return 12.76;
-      case 9: return 14.93;
-      default: return 15.0 + 2.5 * (kProbesPerBlock - 9);
+    double bpk = 0;
+    for (int i = 0; i < kBlocks; ++i) {
+      int probes = (kProbes + i) / kBlocks;
+      switch (probes) {
+        case 1: bpk += 1.44; break;
+        // Based roughly on ChooseNumProbes
+        case 2: bpk += 2.83; break;
+        case 3: bpk += 4.34; break;
+        case 4: bpk += 5.87; break;
+        case 5: bpk += 7.47; break;
+        case 6: bpk += 9.19; break;
+        case 7: bpk += 10.90; break;
+        case 8: bpk += 12.76; break;
+        case 9: bpk += 14.93; break;
+        case 10: bpk += 17.18; break;
+        case 11: bpk += 20.15; break;
+        case 12: bpk += 23.75; break;
+        default: bpk += 27.50 + 3.75 * (probes - 13); break;
+      }
     }
+    return bpk;
   }
 
   RocksBloomFilter(size_t add_count)
-      : bytes(static_cast<size_t>(kBlocks * GetBestBpkForProbes() * add_count / 8.0)),
+      : bytes(static_cast<size_t>(GetBestBpkForProbes() * add_count / 8.0)),
         ptr(new char[bytes]()) {}
 
   static constexpr uint32_t kMixFactor = 0x12345673U;
@@ -632,7 +642,8 @@ public:
     uint32_t a = static_cast<uint32_t>(key);
     uint32_t b = static_cast<uint32_t>(key >> 32);
     for (int i = 0; i < kBlocks; ++i) {
-      FastLocalBloomImpl::AddHash(a, b, bytes, kProbesPerBlock, ptr.get());
+      int probes = (kProbes + i) / kBlocks;
+      FastLocalBloomImpl::AddHash(a, b, bytes, probes, ptr.get());
       a *= kMixFactor;
       b *= kMixFactor;
     }
@@ -647,7 +658,8 @@ public:
     uint32_t b = static_cast<uint32_t>(key >> 32);
     bool rv = true;
     for (int i = 0; i < kBlocks; ++i) {
-      rv &= FastLocalBloomImpl::HashMayMatch(a, b, bytes, kProbesPerBlock, ptr.get());
+      int probes = (kProbes + i) / kBlocks;
+      rv &= FastLocalBloomImpl::HashMayMatch(a, b, bytes, probes, ptr.get());
       a *= kMixFactor;
       b *= kMixFactor;
     }
@@ -658,9 +670,9 @@ public:
   }
 };
 
-template <int kProbesPerBlock, int kBlocks>
-struct FilterAPI<RocksBloomFilter<kProbesPerBlock, kBlocks>> {
-  using Table = RocksBloomFilter<kProbesPerBlock, kBlocks>;
+template <int kProbes, int kBlocks>
+struct FilterAPI<RocksBloomFilter<kProbes, kBlocks>> {
+  using Table = RocksBloomFilter<kProbes, kBlocks>;
   static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
   static void Add(uint64_t key, Table* table) {
     table->Add(key);
@@ -917,6 +929,24 @@ struct FilterAPI<XorFilter2n<ItemType, FingerprintType, FingerprintStorageType, 
 template <typename ItemType, typename FingerprintType, typename HashFamily>
 struct FilterAPI<XorFilterPlus<ItemType, FingerprintType, HashFamily>> {
   using Table = XorFilterPlus<ItemType, FingerprintType, HashFamily>;
+  static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
+  static void Add(uint64_t key, Table* table) {
+    throw std::runtime_error("Unsupported");
+  }
+  static void AddAll(const vector<ItemType> keys, const size_t start, const size_t end, Table* table) {
+    table->AddAll(keys, start, end);
+  }
+  static void Remove(uint64_t key, Table * table) {
+    throw std::runtime_error("Unsupported");
+  }
+  CONTAIN_ATTRIBUTES static bool Contain(uint64_t key, const Table * table) {
+    return (0 == table->Contain(key));
+  }
+};
+
+template <typename ItemType, typename FingerprintType, typename FingerprintStorageType, typename HashFamily>
+struct FilterAPI<XorFilterPlus2<ItemType, FingerprintType, FingerprintStorageType, HashFamily>> {
+  using Table = XorFilterPlus2<ItemType, FingerprintType, FingerprintStorageType, HashFamily>;
   static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
   static void Add(uint64_t key, Table* table) {
     throw std::runtime_error("Unsupported");
@@ -1392,16 +1422,12 @@ int main(int argc, char * argv[]) {
     {113, "Xor13(NBitArray)"},
     {115, "Xor15(NBitArray)"},
 
-/* TODO?
-    {201, "Xor+1(NBitArray)"},
-    {203, "Xor+3(NBitArray)"},
-    {205, "Xor+5(NBitArray)"},
-    {207, "Xor+7(NBitArray)"},
-    {209, "Xor+9(NBitArray)"},
-    {211, "Xor+11(NBitArray)"},
-    {213, "Xor+13(NBitArray)"},
-    {215, "Xor+15(NBitArray)"},
-*/
+    {205, "XorPlus5(NBitArray)"},
+    {207, "XorPlus7(NBitArray)"},
+    {209, "XorPlus9(NBitArray)"},
+    {211, "XorPlus11(NBitArray)"},
+    {213, "XorPlus13(NBitArray)"},
+    {215, "XorPlus15(NBitArray)"},
 
     {308,"Cuckoo8(Extra5Pct)"},
     {310,"Cuckoo10(Extra5Pct)"},
@@ -1410,22 +1436,37 @@ int main(int argc, char * argv[]) {
     {316,"Cuckoo16(Extra5Pct)"},
 
     {802, "TwoBlockBloom2K(Rocks)"},
+    {803, "TwoBlockBloom3K(Rocks)"},
     {804, "TwoBlockBloom4K(Rocks)"},
+    {805, "TwoBlockBloom5K(Rocks)"},
     {806, "TwoBlockBloom6K(Rocks)"},
+    {807, "TwoBlockBloom7K(Rocks)"},
     {808, "TwoBlockBloom8K(Rocks)"},
+    {809, "TwoBlockBloom9K(Rocks)"},
     {810, "TwoBlockBloom10K(Rocks)"},
+    {811, "TwoBlockBloom11K(Rocks)"},
     {812, "TwoBlockBloom12K(Rocks)"},
+    {813, "TwoBlockBloom13K(Rocks)"},
     {814, "TwoBlockBloom14K(Rocks)"},
+    {815, "TwoBlockBloom15K(Rocks)"},
     {816, "TwoBlockBloom16K(Rocks)"},
 
     {901, "BlockedBloom1K(Rocks)"},
+    {902, "BlockedBloom2K(Rocks)"},
     {903, "BlockedBloom3K(Rocks)"},
+    {903, "BlockedBloom4K(Rocks)"},
     {905, "BlockedBloom5K(Rocks)"},
+    {906, "BlockedBloom6K(Rocks)"},
     {907, "BlockedBloom7K(Rocks)"},
+    {908, "BlockedBloom8K(Rocks)"},
     {909, "BlockedBloom9K(Rocks)"},
+    {910, "BlockedBloom10K(Rocks)"},
     {911, "BlockedBloom11K(Rocks)"},
+    {912, "BlockedBloom12K(Rocks)"},
     {913, "BlockedBloom13K(Rocks)"},
+    {914, "BlockedBloom14K(Rocks)"},
     {915, "BlockedBloom15K(Rocks)"},
+    {916, "BlockedBloom16K(Rocks)"},
     {917, "BlockedBloom17K(Rocks)"},
 
     {1014, "HomogRibbon16_1"},
@@ -2007,7 +2048,7 @@ int main(int argc, char * argv[]) {
   }
 
 
-  // Specific Xor bit widths
+  // Specific Xor/XorPlus bit widths
   a = 101;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
       auto cf = FilterBenchmark<
@@ -2064,6 +2105,48 @@ int main(int argc, char * argv[]) {
           add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
       cout << setw(NAME_WIDTH) << names[a] << cf << endl;
   }
+  a = 205;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilterPlus2<uint64_t, uint8_t, NBitArray<uint8_t, 5>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 207;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilterPlus2<uint64_t, uint8_t, NBitArray<uint8_t, 7>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 209;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilterPlus2<uint64_t, uint16_t, NBitArray<uint16_t, 9>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 211;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilterPlus2<uint64_t, uint16_t, NBitArray<uint16_t, 11>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 213;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilterPlus2<uint64_t, uint16_t, NBitArray<uint16_t, 13>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
+  a = 215;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<
+          XorFilterPlus2<uint64_t, uint16_t, NBitArray<uint16_t, 15>, SimpleMixSplit>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed, true);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
   // Cuckoo (Extra5Pct) --------------------------------------------------
   a = 308;
   if (algorithmId == a || (algos.find(a) != algos.end())) {
@@ -2102,104 +2185,54 @@ int main(int argc, char * argv[]) {
   }
 
   // TwoBlockBloom(Rocks)
-  a = 802;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<1, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+#define ADD(k) \
+  a = 800 + k; \
+  if (algorithmId == a || (algos.find(a) != algos.end())) { \
+      auto cf = FilterBenchmark<RocksBloomFilter<k, 2>>( \
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed); \
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl; \
   }
-  a = 804;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<2, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 806;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<3, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 808;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<4, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 810;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<5, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 812;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<6, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 814;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<7, 2>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
+  ADD(2);
+  ADD(3);
+  ADD(4);
+  ADD(5);
+  ADD(6);
+  ADD(7);
+  ADD(8);
+  ADD(9);
+  ADD(10);
+  ADD(11);
+  ADD(12);
+  ADD(13);
+  ADD(14);
+  ADD(15);
+  ADD(16);
 
   // BlockedBloom(Rocks)
-  a = 901;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<1, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+#undef ADD
+#define ADD(k) \
+  a = 900 + k; \
+  if (algorithmId == a || (algos.find(a) != algos.end())) { \
+      auto cf = FilterBenchmark<RocksBloomFilter<k, 1>>( \
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed); \
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl; \
   }
-  a = 903;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<3, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 905;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<5, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 907;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<7, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 909;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<9, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 911;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<11, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 913;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<13, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 915;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<15, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
-  a = 917;
-  if (algorithmId == a || (algos.find(a) != algos.end())) {
-      auto cf = FilterBenchmark<RocksBloomFilter<17, 1>>(
-          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
-      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
-  }
+  ADD(1);
+  ADD(2);
+  ADD(3);
+  ADD(4);
+  ADD(5);
+  ADD(6);
+  ADD(7);
+  ADD(8);
+  ADD(9);
+  ADD(10);
+  ADD(11);
+  ADD(12);
+  ADD(13);
+  ADD(14);
+  ADD(15);
+  ADD(16);
 
   // Homogeneous Ribbon
   a = 1014;

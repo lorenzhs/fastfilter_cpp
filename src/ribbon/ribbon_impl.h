@@ -953,8 +953,18 @@ class SerializableInterleavedSolution {
       Index start_bit;
       InterleavedPrepareQuery(input, hasher, *this, &hash, &segment_num,
                               &num_columns, &start_bit);
-      return InterleavedFilterQuery(hash, segment_num, num_columns, start_bit,
-                                    hasher, *this);
+      if (TS::kFixedNumColumns > 0 && TS::kFixedNumColumns * kCoeffBits <= 512) {
+        // Use branchless query
+        constexpr ResultRow mask = (ResultRow{1} << TS::kFixedNumColumns) - 1;
+        const ResultRow expected = hasher.GetResultRowFromHash(hash) & mask;
+        return expected == InterleavedPhsfQuery(hash, segment_num,
+                                                num_columns, start_bit,
+                                                hasher, *this);
+      } else {
+        // Use short-circuiting query
+        return InterleavedFilterQuery(hash, segment_num, num_columns, start_bit,
+                                      hasher, *this);
+      }
     }
   }
 

@@ -46,7 +46,6 @@ class XorFilter2 {
   size_t arrayLength;
   size_t blockLength;
   FingerprintStorageType *fingerprints;
-  uint64_t fingerprintMask;
 
   HashFamily* hasher;
 
