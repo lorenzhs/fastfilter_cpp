@@ -106,5 +106,9 @@ template <typename T>
   size_t howmanyx = x_size - howmanyy;
   reservoirsampling(result.data(), howmanyx,  x_begin, x_end, &seed);
   reservoirsampling(result.data() + howmanyx, howmanyy,  y_begin, y_end, &seed);
+  size_t sz = result.size();
+  for (size_t i = 0; i + 1 < sz; ++i) {
+    std::swap(result[i], result[i + 1 + random_bounded(sz - i - 1, &seed)]);
+  }
   return result;
 }
