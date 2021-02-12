@@ -953,7 +953,7 @@ class SerializableInterleavedSolution {
       Index start_bit;
       InterleavedPrepareQuery(input, hasher, *this, &hash, &segment_num,
                               &num_columns, &start_bit);
-      if (TS::kFixedNumColumns > 0 && TS::kFixedNumColumns * kCoeffBits <= 512) {
+      if (TS::kFixedNumColumns > 0 && TS::kFixedNumColumns <= 4) {
         // Use branchless query
         constexpr ResultRow mask = (ResultRow{1} << TS::kFixedNumColumns) - 1;
         const ResultRow expected = hasher.GetResultRowFromHash(hash) & mask;
@@ -1293,6 +1293,10 @@ class BalancedBanding
     const Index vshards_mask = vshards - 1;
     std::unique_ptr<Index[]> added_to_vshards(new Index[vshards]{});
 
+#ifdef BUFFER_BUMPS
+    std::unique_ptr<std::deque<Hash>[]> bumped_to_vshard(new std::deque<Hash>[vshards]);
+#endif
+
     // Iterating by vshards in order has the problem that adding small
     // buckets in vshard i could interfere with adding larger buckets
     // in vshard i+1, due to natural spill-over up to ribbon width.
@@ -1320,6 +1324,19 @@ class BalancedBanding
             cur_slot += CACHE_LINE_SIZE / sizeof(CoeffRow);
           } while (cur_slot < end_slot);
         }
+#ifdef BUFFER_BUMPS
+        if (bmin == 0) {
+          const auto b = bumped_to_vshard[i].begin();
+          const auto e = bumped_to_vshard[i].end();
+          if (!banding_.AddRange(b, e)) {
+            fprintf(stderr, "Failed on vshard %u\n",
+                        (unsigned)i);
+            return false;
+          }
+          added_to_vshards[i] += e - b;
+          bumped_to_vshard[i].clear();
+        }
+#endif
         for (Index bucket = bmin; bucket < bmax; ++bucket) {
           Index vshard = i - bucket;
           assert(vshard >= level_vshard_begin);
@@ -1341,6 +1358,10 @@ class BalancedBanding
                 static_cast<char>(1 << (bit_index % 8));
             for (Hash h : entries) {
               Hash bh = this->BumpHash(h);
+#ifdef BUFFER_BUMPS
+              bumped_to_vshard[static_cast<size_t>(bh >>
+                                                   (64 - log2_vshards))].push_back(bh);
+#else
               if (!banding_.Add(bh)) {
                 fprintf(stderr, "Failed on vshard %u bucket %u\n",
                         (unsigned)vshard, (unsigned)bucket);
@@ -1348,6 +1369,7 @@ class BalancedBanding
               }
               added_to_vshards[static_cast<size_t>(bh >>
                                                    (64 - log2_vshards))]++;
+#endif
             }
             /*
             fprintf(stderr, "Bumped %zu from bucket %u\n", entries.size(),
