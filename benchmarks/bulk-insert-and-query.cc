@@ -490,7 +490,7 @@ public:
   }
 
   BalancedRibbonFilter(size_t add_count)
-      : log2_vshards((uint32_t)FloorLog2((add_count + add_count / 3 + add_count / 13) / (128 * sizeof(CoeffType)))),
+      : log2_vshards((uint32_t)FloorLog2((add_count + add_count / 3 + add_count / 5) / (128 * sizeof(CoeffType)))),
         num_slots(GetNumSlots(add_count, log2_vshards)),
         bytes(static_cast<size_t>((num_slots * kFractionalCols + 7) / 8)),
         ptr(new char[bytes]),
@@ -603,14 +603,18 @@ struct FilterAPI<StandardRibbonFilter<CoeffType, kNumColumns, kMinPctOverhead, k
   }
 };
 
-template <int kProbes, int kBlocks>
+template <int kProbes, int kBlocks, int kMilliBitsPerKey = 0>
 class RocksBloomFilter {
   size_t bytes;
   unique_ptr<char[]> ptr;
 
 public:
-  static double GetBestBpkForProbes() {
+  static double GetBitsPerKey() {
     double bpk = 0;
+    if (kMilliBitsPerKey > 0) {
+      return kMilliBitsPerKey / 1000.0;
+    }
+    // Else, best bpk for probes
     for (int i = 0; i < kBlocks; ++i) {
       int probes = (kProbes + i) / kBlocks;
       switch (probes) {
@@ -634,7 +638,7 @@ public:
   }
 
   RocksBloomFilter(size_t add_count)
-      : bytes(static_cast<size_t>(GetBestBpkForProbes() * add_count / 8.0)),
+      : bytes(static_cast<size_t>(GetBitsPerKey() * add_count / 8.0)),
         ptr(new char[bytes]()) {}
 
   static constexpr uint32_t kMixFactor = 0x12345673U;
@@ -670,9 +674,9 @@ public:
   }
 };
 
-template <int kProbes, int kBlocks>
-struct FilterAPI<RocksBloomFilter<kProbes, kBlocks>> {
-  using Table = RocksBloomFilter<kProbes, kBlocks>;
+template <int kProbes, int kBlocks, int kMilliBitsPerKey>
+struct FilterAPI<RocksBloomFilter<kProbes, kBlocks, kMilliBitsPerKey>> {
+  using Table = RocksBloomFilter<kProbes, kBlocks, kMilliBitsPerKey>;
   static Table ConstructFromAddCount(size_t add_count) { return Table(add_count); }
   static void Add(uint64_t key, Table* table) {
     table->Add(key);
@@ -1470,6 +1474,7 @@ int main(int argc, char * argv[]) {
     {915, "BlockedBloom15K(Rocks)"},
     {916, "BlockedBloom16K(Rocks)"},
     {917, "BlockedBloom17K(Rocks)"},
+    {999, "BlockedBloom6KCompare(Rocks)"},
 
     {1014, "HomogRibbon16_1"},
     {1015, "HomogRibbon32_1"},
@@ -1666,11 +1671,14 @@ int main(int argc, char * argv[]) {
   }
 
   assert(to_lookup.size() == actual_sample_size);
-  size_t distinct_lookup;
-  size_t distinct_add;
+  size_t distinct_lookup = to_lookup.size();
+  size_t distinct_add = to_add.size();
+  size_t intersectionsize = 0;
+#ifdef CHECK_MATCH_SIZE // Can be really slow
   std::cout << "checking match size... " << std::flush;
-  size_t intersectionsize = match_size(to_lookup, to_add, &distinct_lookup, & distinct_add);
+  intersectionsize = match_size(to_lookup, to_add, &distinct_lookup, & distinct_add);
   std::cout << "\r                       \r" << std::flush;
+#endif
 
   bool hasduplicates = false;
   if(intersectionsize > 0) {
@@ -2245,6 +2253,13 @@ int main(int argc, char * argv[]) {
   ADD(14);
   ADD(15);
   ADD(16);
+  // For direct comparison with BlockedBloom64
+  a = 999;
+  if (algorithmId == a || (algos.find(a) != algos.end())) {
+      auto cf = FilterBenchmark<RocksBloomFilter<6, 1, 10240>>(
+          add_count, to_add, distinct_add, to_lookup, distinct_lookup, intersectionsize, hasduplicates, mixed_sets, seed);
+      cout << setw(NAME_WIDTH) << names[a] << cf << endl;
+  }
 
   // Homogeneous Ribbon
   a = 1014;
