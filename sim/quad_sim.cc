@@ -143,6 +143,9 @@ int main(int argc, char *argv[]) {
             }
         }
         if (!processed_single && more_todo) {
+            std::cout << "fail" << std::endl;
+            return 1;
+            /*
             bool good_kick = false;
             for (size_t i = 0; i < len; ++i) {
                 size_t count = arr[i].size();
@@ -168,10 +171,11 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-            }
+            }*/
         }
     } while (more_todo);
 
+    /*
     std::cout << "4x" << nkeys << " over " << len << ":" << std::endl;
     std::cout << "good collision " << good_collision << ", collision2 " << collision2 << ", collision3 " << collision3 << std::endl;
     std::cout << "initial_unmapped: " << initial_unmapped << " (" << (100.0 * initial_unmapped / len) << "%)" << std::endl;
@@ -179,5 +183,7 @@ int main(int argc, char *argv[]) {
     std::cout << "initial_run: " << initial_run << " (" << (100.0 * initial_run / len) << "%)" << std::endl;
     std::cout << "later_mapped: " << later_mapped << " (" << (100.0 * later_mapped / len) << "%)" << std::endl;
     std::cout << "kicked: " << kicked << " (" << (100.0 * kicked / len) << "%)" << std::endl;
+    */
+    std::cout << "success" << std::endl;
     return 0;
 }
