@@ -35,8 +35,18 @@ class CustomHasher : public StandardHasher<TypesAndSettings> {
  public:
   IMPORT_RIBBON_TYPES_AND_SETTINGS(TypesAndSettings);
 
-  inline CoeffRow GetCoeffRow(Hash h) const {
-    CoeffRow v = StandardHasher<TypesAndSettings>::GetCoeffRow(h);
+  inline CoeffRow GetCoeffRow(Hash h0) const {
+    // Use a stronger re-mix than a standard Ribbon implementation is
+    // OK with.
+    uint64_t h = h0;
+    // murmur something
+    h ^= h >> 33;
+    h *= UINT64_C(0xff51afd7ed558ccd);
+    h ^= h >> 33;
+    h *= UINT64_C(0xc4ceb9fe1a85ec53);
+    h ^= h >> 33;
+
+    CoeffRow v = StandardHasher<TypesAndSettings>::GetCoeffRow((Hash)h);
     // Ensure non-zero
     if ((v & coeff_mask_) == 0) {
         v >>= 32;
@@ -87,7 +97,8 @@ int RunTest(char *argv[]) {
     size_t iteration = 1;
 
     Index num_starts = (bucket_size << buckets_log2);
-    Index num_slots = num_starts + kCoeffBits - 1;
+    Index num_slots_physical = num_starts + kCoeffBits - 1;
+    Index num_slots = num_starts + coeff_bits - 1;
 
     uint64_t increment = ((kGR >> 1 >> (63 - buckets_log2)) | uint64_t{1}) << 1 << (63 - buckets_log2);
 
@@ -95,7 +106,7 @@ int RunTest(char *argv[]) {
 
     for (;; ++iteration) {
         Banding banding;
-        banding.Reset(num_slots);
+        banding.Reset(num_slots_physical);
         banding.coeff_mask_ = static_cast<CoeffRow>(-1) >> (64 - coeff_bits);
 
         Index added = 0;
@@ -121,7 +132,7 @@ int RunTest(char *argv[]) {
         std::cout << "AVERAGE epsilon (slots) at first failure: " << (1.0 - 1.0 * sum_added / num_slots / iteration) << std::endl;
         uint64_t sum_starts = uint64_t{num_starts} * iteration;
         if (sum_added >= sum_starts) {
-            std::cout << "AVERAGE OVERload entries at first failure: " << ((sum_added - sum_starts) / iteration) << std::endl;
+            std::cout << "AVERAGE OVERload entries at first failure: " << (1.0 * (sum_added - sum_starts) / iteration) << std::endl;
         } else {
             std::cout << "AVERAGE UNDERload epsilon (starts) at first failure: " << (1.0 - 1.0 * sum_added / sum_starts) << std::endl;
         }
