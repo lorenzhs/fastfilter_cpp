@@ -486,12 +486,12 @@ double ExpectedCollisionFpRate(const Hasher& /*hasher*/, double added) {
 // StandardBanding: a canonical implementation of BandingStorage and
 // BacktrackStorage, with convenience API for banding (solving with on-the-fly
 // Gaussian elimination) with and without backtracking.
-template <class TypesAndSettings>
-class StandardBanding : public StandardHasher<TypesAndSettings> {
+template <class Hasher>
+class StandardBandingBase : public Hasher {
  public:
-  IMPORT_RIBBON_TYPES_AND_SETTINGS(TypesAndSettings);
+  IMPORT_RIBBON_TYPES_AND_SETTINGS(typename Hasher::TS);
 
-  StandardBanding(Index num_slots = 0, Index backtrack_size = 0) {
+  StandardBandingBase(Index num_slots = 0, Index backtrack_size = 0) {
     Reset(num_slots, backtrack_size);
   }
 
@@ -707,6 +707,9 @@ class StandardBanding : public StandardHasher<TypesAndSettings> {
   std::unique_ptr<Index[]> backtrack_;
   Index backtrack_size_ = 0;
 };
+
+template <class TypesAndSettings>
+using StandardBanding = StandardBandingBase<StandardHasher<TypesAndSettings>>;
 
 // Implements concept SimpleSolutionStorage, mostly for demonstration
 // purposes. This is "in memory" only because it does not handle byte
