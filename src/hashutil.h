@@ -57,6 +57,29 @@ class SimpleMixSplit {
   }
 };
 
+class SimpleXorMul {
+ public:
+  uint64_t seed;
+  SimpleXorMul() {
+    ::std::random_device random;
+    seed = random();
+    seed <<= 32;
+    seed |= random();
+  }
+
+  // To match ribbon::StandardRehasherAdapter
+  inline uint64_t operator()(uint64_t key) const {
+    return (key ^ seed) * uint64_t{0x6193d459236a3a0d};
+  }
+};
+
+class NoopHash {
+ public:
+  inline uint64_t operator()(uint64_t key) const {
+    return key;
+  }
+};
+
 }
 
 #endif  // CUCKOO_FILTER_HASHUTIL_H_
