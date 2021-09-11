@@ -3,6 +3,7 @@
 
 #include <assert.h>
 
+#include <random>
 #include <sstream>
 
 #include "bitsutil.h"
@@ -30,9 +31,10 @@ class SingleTable {
   // using a pointer adds one more indirection
   Bucket *buckets_;
   size_t num_buckets_;
+  std::mt19937 rng;
 
  public:
-  explicit SingleTable(const size_t num) : num_buckets_(num) {
+  explicit SingleTable(const size_t num) : num_buckets_(num), rng(std::random_device{}()) {
     buckets_ = new Bucket[num_buckets_ + kPaddingBuckets];
     memset(buckets_, 0, kBytesPerBucket * (num_buckets_ + kPaddingBuckets));
   }
@@ -201,7 +203,7 @@ class SingleTable {
       }
     }
     if (kickout) {
-      size_t r = rand() % kTagsPerBucket;
+      size_t r = rng() % kTagsPerBucket;
       oldtag = ReadTag(i, r);
       WriteTag(i, r, tag);
     }

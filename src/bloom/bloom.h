@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <climits>
 #include <sstream>
 
 #include "hashutil.h"
@@ -85,7 +86,7 @@ static inline size_t fastrangesize(uint64_t word, size_t p) {
 #endif // SIZE_MAX == UINT32_MAX
 }
 
-static size_t getBestK(size_t bitsPerItem) {
+static inline size_t getBestK(size_t bitsPerItem) {
   return max(1, (int)round((double)bitsPerItem * log(2)));
 }
 

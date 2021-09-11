@@ -45,8 +45,8 @@ class GQFilter {
     do {
         qbits++;
         nslots = (1ULL << qbits);
-    } while(nslots * 0.9 < n);
-    uint64_t nhashbits = qbits + 8;
+    } while(nslots * 0.95 < n);
+    uint64_t nhashbits = qbits + bits_per_item;
     mask = (1ULL << nhashbits) - 1;
 
 // std::cout << "(CQF: nslots " << nslots << " nhashbits " << nhashbits << " n " << n << " bitsPerItem " << bitsPerItem << ")\n";

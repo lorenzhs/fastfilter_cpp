@@ -22,6 +22,17 @@ THE SOFTWARE.
 Author: Alex D. Breslow 
         Advanced Micro Devices, Inc.
         AMD Research
+
+Code Source: https://github.com/AMDComputeLibraries/morton_filter
+
+VLDB 2018 Paper: https://www.vldb.org/pvldb/vol11/p1041-breslow.pdf
+
+How To Cite:
+  Alex D. Breslow and Nuwan S. Jayasena. Morton Filters: Faster, Space-Efficient
+  Cuckoo Filters Via Biasing, Compression, and Decoupled Logical Sparsity. PVLDB,
+  11(9):1041-1055, 2018
+  DOI: https://doi.org/10.14778/3213880.3213884
+
 */
 #ifndef _UTIL_H
 #define _UTIL_H
@@ -63,7 +74,8 @@ namespace util{
   // This could be implemented using fancy binary arithmatic or builtins, 
   // but this probably suffices if the integer is known at compile time.
   constexpr inline uint32_t log2ceil(uint32_t integer){
-    //return ceil(log2(integer));
+    // I'm doing it this way because log2 is not a constexpr function in the 
+    // Clang toolchain whereas __builtin_clz is.
     return 32u - __builtin_clz(integer - 1u);
   }
 
@@ -113,6 +125,7 @@ namespace util{
 } // End of util namespace
 
 
+/*
 // FIXME: Not yet tested
 std::ostream& operator<<(std::ostream& os, __uint128_t integer){
   std::stringstream ss;
@@ -130,6 +143,7 @@ std::ostream& operator<<(std::ostream& os, __uint128_t integer){
   }
   return os;
 }
+*/
 
 
 #endif

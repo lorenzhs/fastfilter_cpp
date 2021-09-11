@@ -1,0 +1,6 @@
+[submodule "src/bumpribbon"]
+	path = src/bumpribbon
+	url = https://github.com/lorenzhs/BuRR
+[submodule "src/retrieval-test"]
+	path = src/retrieval-test
+	url = https://github.com/lorenzhs/retrieval-test

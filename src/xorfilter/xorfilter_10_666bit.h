@@ -3,8 +3,8 @@
 
 #include <assert.h>
 #include <algorithm>
-#include <xorfilter.h>
-#include <xorfilter_10bit.h>
+#include "xorfilter.h"
+#include "xorfilter_10bit.h"
 #include "hashutil.h"
 
 using namespace std;

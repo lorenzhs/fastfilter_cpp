@@ -27,8 +27,9 @@ inline int mostSignificantBit(uint64_t x) {
     return 63 - numberOfLeadingZeros64(x);
 }
 
-inline int bitCount64(uint64_t x) {
-    return __builtin_popcountll(x);
+__attribute__((noinline)) int bitCount64(uint64_t x) {
+    return _mm_popcnt_u64(x);
+    // return __builtin_popcountll(x);
 }
 
 class Rank9 {

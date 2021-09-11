@@ -20,7 +20,7 @@
 #include <immintrin.h>
 #endif
 
-namespace ribbon {
+ namespace r2 {
 
 class BloomMath {
  public:
@@ -481,4 +481,4 @@ class LegacyLocalityBloomImpl {
   }
 };
 
-}  // namespace ribbon
+}  //  namespace r2

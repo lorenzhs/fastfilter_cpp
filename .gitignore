@@ -1,3 +1,16 @@
+perf.data*
+benchmarks/ribbon-results*.txt
+benchmarks/**/results_*.txt
+benchmarks/log_*
+benchmarks/logs_*
+auto/
+.cache/
+*.aux
+*.log
+*.fls
+*.synctex.gz
+*.fdb_latexmk
+
 # Prerequisites
 *.d
 

@@ -1,10 +1,13 @@
 #ifndef COUNTING_BLOOM_FILTER_BLOOM_FILTER_H_
 #define COUNTING_BLOOM_FILTER_BLOOM_FILTER_H_
 
-#include <algorithm>
-#include <assert.h>
-
 #include "hashutil.h"
+
+#include <assert.h>
+#include <string.h>
+
+#include <algorithm>
+#include <iostream>
 
 #if defined(__BMI2__)
 #include <immintrin.h>

@@ -15,7 +15,7 @@
 #include "port.h"  // for PREFETCH
 #include "ribbon_alg.h"
 
-namespace ribbon {
+ namespace r2 {
 
 // RIBBON PHSF & RIBBON Filter (Rapid Incremental Boolean Banding ON-the-fly)
 //
@@ -119,7 +119,7 @@ struct AddInputSelector<Key, ResultRow, true /*IsFilter*/> {
   /* Some more additions */                                                   \
   using QueryInput = Key;                                                     \
   using AddInput =                                                            \
-      typename ribbon::AddInputSelector<Key, ResultRow,    \
+      typename r2::AddInputSelector<Key, ResultRow,    \
                                                            TS::kIsFilter>::T; \
   static constexpr auto kCoeffBits =                                          \
       static_cast<Index>(sizeof(CoeffRow) * 8U);                              \
@@ -486,12 +486,12 @@ double ExpectedCollisionFpRate(const Hasher& /*hasher*/, double added) {
 // StandardBanding: a canonical implementation of BandingStorage and
 // BacktrackStorage, with convenience API for banding (solving with on-the-fly
 // Gaussian elimination) with and without backtracking.
-template <class Hasher>
-class StandardBandingBase : public Hasher {
+template <class TypesAndSettings>
+class StandardBanding : public StandardHasher<TypesAndSettings> {
  public:
-  IMPORT_RIBBON_TYPES_AND_SETTINGS(typename Hasher::TS);
+  IMPORT_RIBBON_TYPES_AND_SETTINGS(TypesAndSettings);
 
-  StandardBandingBase(Index num_slots = 0, Index backtrack_size = 0) {
+  StandardBanding(Index num_slots = 0, Index backtrack_size = 0) {
     Reset(num_slots, backtrack_size);
   }
 
@@ -707,9 +707,6 @@ class StandardBandingBase : public Hasher {
   std::unique_ptr<Index[]> backtrack_;
   Index backtrack_size_ = 0;
 };
-
-template <class TypesAndSettings>
-using StandardBanding = StandardBandingBase<StandardHasher<TypesAndSettings>>;
 
 // Implements concept SimpleSolutionStorage, mostly for demonstration
 // purposes. This is "in memory" only because it does not handle byte
@@ -1427,14 +1424,14 @@ class BalancedBanding
   size_t count_;
 };
 
-}  // namespace ribbon
+}  //  namespace r2
 
 // For convenience working with templates
 #define IMPORT_RIBBON_IMPL_TYPES(TypesAndSettings)                            \
-  using Hasher = ribbon::StandardHasher<TypesAndSettings>;                    \
-  using Banding = ribbon::StandardBanding<TypesAndSettings>;                  \
-  using SimpleSoln = ribbon::InMemSimpleSolution<TypesAndSettings>;           \
-  using InterleavedSoln = ribbon::SerializableInterleavedSolution<            \
+  using Hasher = r2::StandardHasher<TypesAndSettings>;                    \
+  using Banding = r2::StandardBanding<TypesAndSettings>;                  \
+  using SimpleSoln = r2::InMemSimpleSolution<TypesAndSettings>;           \
+  using InterleavedSoln = r2::SerializableInterleavedSolution<            \
           TypesAndSettings>;                                                  \
   static_assert(sizeof(Hasher) + sizeof(Banding) + sizeof(SimpleSoln) +       \
                         sizeof(InterleavedSoln) >                             \

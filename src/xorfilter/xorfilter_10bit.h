@@ -3,7 +3,7 @@
 
 #include <assert.h>
 #include <algorithm>
-#include <xorfilter.h>
+#include "xorfilter.h"
 #include "hashutil.h"
 
 using namespace std;

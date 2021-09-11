@@ -10,7 +10,7 @@
 
 #include "math128.h"
 
-namespace ribbon {
+ namespace r2 {
 
 // RIBBON PHSF & RIBBON Filter (Rapid Incremental Boolean Banding ON-the-fly)
 //
@@ -1055,7 +1055,7 @@ void InterleavedBackSubst(InterleavedSolutionStorage *iss,
   Index segment_num = num_segments;
   while (block > upper_start_block) {
     --block;
-    BackSubstBlock(state.get(), num_columns, bs, block * kCoeffBits);
+    r2::BackSubstBlock(state.get(), num_columns, bs, block * kCoeffBits);
     segment_num -= num_columns;
     for (Index i = 0; i < num_columns; ++i) {
       iss->StoreSegment(segment_num + i, state[i]);
@@ -1067,7 +1067,7 @@ void InterleavedBackSubst(InterleavedSolutionStorage *iss,
   --num_columns;
   while (block > 0) {
     --block;
-    BackSubstBlock(state.get(), num_columns, bs, block * kCoeffBits);
+    r2::BackSubstBlock(state.get(), num_columns, bs, block * kCoeffBits);
     segment_num -= num_columns;
     for (Index i = 0; i < num_columns; ++i) {
       iss->StoreSegment(segment_num + i, state[i]);
@@ -1220,4 +1220,4 @@ inline bool InterleavedFilterQuery(
 // prefetching memory, to hide memory latency for multiple queries in a
 // single thread.
 
-}  // namespace ribbon
+}  //  namespace r2

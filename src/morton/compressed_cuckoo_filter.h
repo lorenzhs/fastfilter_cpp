@@ -22,6 +22,17 @@ THE SOFTWARE.
 Author: Alex D. Breslow
         Advanced Micro Devices, Inc.
         AMD Research
+
+Code Source: https://github.com/AMDComputeLibraries/morton_filter
+
+VLDB 2018 Paper: https://www.vldb.org/pvldb/vol11/p1041-breslow.pdf
+
+How To Cite:
+  Alex D. Breslow and Nuwan S. Jayasena. Morton Filters: Faster, Space-Efficient
+  Cuckoo Filters Via Biasing, Compression, and Decoupled Logical Sparsity. PVLDB,
+  11(9):1041-1055, 2018
+  DOI: https://doi.org/10.14778/3213880.3213884
+
 */
 #ifndef _COMPRESSED_CUCKOO_FILTER_H
 #define _COMPRESSED_CUCKOO_FILTER_H
@@ -53,7 +64,7 @@ Author: Alex D. Breslow
 #define UNROLL __attribute__((optimize("unroll-loops")))
 
 struct Tester; // Forward declaration
-std::ostream& operator<<(std::ostream& os, __uint128_t integer);
+// std::ostream& operator<<(std::ostream& os, __uint128_t integer);
 
 namespace CompressedCuckoo{
   struct AccessCounter{
@@ -393,7 +404,8 @@ namespace CompressedCuckoo{
           587, 653, 719, 787, 853, 919, 983, 1051, 1117, 1181, 1249, 1319, 1399,
           1459,
           1511, 1571, 1637, 1699, 1759, 1823, 1889, 1951, 2017, 1579};//, 1579
-        static_assert(offsets[0] > _buckets_per_block,
+        static_assert(offsets[0] > _buckets_per_block ||
+                      _alternate_bucket_selection_method != AlternateBucketSelectionMethodEnum::TABLE_BASED_OFFSET,
           "Cannot use TABLE_BASED_OFFSET with so many buckets per block");
         offset = offsets[fingerprint % (sizeof(offsets) / sizeof(offsets[0]))];
         break;
@@ -451,31 +463,14 @@ namespace CompressedCuckoo{
 
   inline block_t* allocate_cache_aligned_storage(uint64_t total_blocks){
     size_t allocation_size = sizeof(block_t) * total_blocks;
-
-    block_t* storage;
-    const int malloc_failed =
-        posix_memalign(reinterpret_cast<void**>(&storage), g_cache_line_size_bytes, allocation_size);
-    if (malloc_failed) throw ::std::bad_alloc();
-
-    //block_t* storage = static_cast<block_t*>(aligned_alloc(
-    //  g_cache_line_size_bytes, allocation_size));
-
-
-
+    block_t* storage = static_cast<block_t*>(aligned_alloc(
+      g_cache_line_size_bytes, allocation_size));
     // Currently set to false because clear_swath hasn't been rigorously tested
     constexpr bool _only_clear_ota_and_fca = false;
     if(!_only_clear_ota_and_fca){ // Competitive with the code in the loop below
-
-// from https://phabricator.kde.org/D13900
-#if defined(__GNUC__) && !defined(__INTEL_COMPILER) && (((__GNUC__ * 100) + __GNUC_MINOR__) >= 800)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-#endif
-      memset(storage, 0x0, allocation_size);
-#if defined(__GNUC__) && !defined(__INTEL_COMPILER) && (((__GNUC__ * 100) + __GNUC_MINOR__) >= 800)
-#pragma GCC diagnostic pop
-#endif
-
+      for(hash_t i = 0; i < total_blocks; i++){
+        storage[i] = block_t{};
+      }
       return storage;
     } // ELSE
     for(hash_t i = 0; i < total_blocks; i++){
@@ -514,12 +509,10 @@ namespace CompressedCuckoo{
 
       size_t allocation_size = sizeof(*_summed_counters) *
         (_buckets_per_block + 1);
-
-      // _summed_counters = static_cast<decltype(_summed_counters)>(aligned_alloc(g_cache_line_size_bytes, allocation_size));
-      const int malloc_failed =
-        posix_memalign(reinterpret_cast<void**>(&_summed_counters), g_cache_line_size_bytes, allocation_size);
-      if (malloc_failed) throw ::std::bad_alloc();
-
+      // Round allocation size up to a multiple of 64.
+      allocation_size = (allocation_size + g_cache_line_size_bytes - 1) &
+        ~(g_cache_line_size_bytes - 1);
+      _summed_counters = static_cast<decltype(_summed_counters)>(aligned_alloc(g_cache_line_size_bytes, allocation_size));
      // Memset not required, initialized by full_exclusive_scan
 
       if(_storage == NULL || _summed_counters == NULL){
@@ -690,8 +683,6 @@ namespace CompressedCuckoo{
       "per block must be one or more.");
     constexpr uint_fast8_t masked_count = static_cast<uint_fast8_t>(util::log2ceil(
       _max_fingerprints_per_block) / _fullness_counter_width) - 1;
-    //constexpr uint_fast8_t masked_count = static_cast<uint_fast8_t>(ceil(log2(
-    //  _max_fingerprints_per_block) / _fullness_counter_width)) - 1;
     for(int8_t i = 0; i < masked_count; i++){ // Masked to avoid overflows
       sum = (sum & _reduction_masks[i]) + ((sum >> (_fullness_counter_width << i)) & _reduction_masks[i]);
     }
@@ -755,8 +746,9 @@ namespace CompressedCuckoo{
   INLINE uint16_t exclusive_reduce_with_popcount128(const block_t& b,
     uint8_t counter_index) const{
     constexpr __uint128_t one = 1;
-    const __uint128_t mask = (one << (_fullness_counter_width * counter_index))
-      - one;
+    // Thanks to @asl for the bugfix https://github.com/AMDComputeLibraries/morton_filter/issues/2#issuecomment-568480311
+    const uint64_t shift = _fullness_counter_width * counter_index;
+    const __uint128_t mask = shift == 128 ? __uint128_t(-1) : (one << shift) - one;
     uint8_t sum = 0u;
     __uint128_t counters;
     memcpy(&counters, &b, sizeof(__uint128_t));
@@ -1157,7 +1149,7 @@ namespace CompressedCuckoo{
   }
 
   // Item at a time
-  inline bool likely_contains(const keys_t key){
+  inline bool likely_contains(const keys_t key) const {
     hash_t raw_hash = raw_primary_hash(key);
     atom_t fingerprint = fingerprint_function(raw_hash);
     // Primary bucket
@@ -1222,7 +1214,7 @@ namespace CompressedCuckoo{
   }
 
   // This is the $\alpha_C$ term in the paper.
-  inline double report_block_occupancy(){
+  inline double report_block_occupancy() const{
     uint64_t full_slots_count = 0;
     for(uint64_t block_id = 0; block_id < _total_blocks; block_id++){
       full_slots_count += get_bucket_start_index(block_id, _buckets_per_block);
@@ -1233,7 +1225,7 @@ namespace CompressedCuckoo{
   // Methods specific to Morton filters
 
   // Reports what fraction of the bits of the Overflow Tracking Array are set
-  double report_ota_occupancy(){
+  double report_ota_occupancy() const{
     uint64_t set_bit_count = 0;
     if(_morton_filter_functionality_enabled){
       for(uint64_t i = 0; i < _total_blocks; i++){

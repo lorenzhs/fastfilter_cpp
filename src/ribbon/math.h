@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace ribbon {
+ namespace r2 {
 
 // Fast implementation of floor(log2(v)). Undefined for 0 or negative
 // numbers (in case of signed type).
@@ -183,4 +183,4 @@ inline int BitParity(T v) {
 #endif
 }
 
-}  // namespace ribbon
+}  //  namespace r2

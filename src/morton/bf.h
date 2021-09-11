@@ -22,6 +22,17 @@ THE SOFTWARE.
 Author: Alex D. Breslow
         Advanced Micro Devices, Inc.
         AMD Research
+
+Code Source: https://github.com/AMDComputeLibraries/morton_filter
+
+VLDB 2018 Paper: https://www.vldb.org/pvldb/vol11/p1041-breslow.pdf
+
+How To Cite:
+  Alex D. Breslow and Nuwan S. Jayasena. Morton Filters: Faster, Space-Efficient
+  Cuckoo Filters Via Biasing, Compression, and Decoupled Logical Sparsity. PVLDB,
+  11(9):1041-1055, 2018
+  DOI: https://doi.org/10.14778/3213880.3213884
+
 */
 #ifndef _BF_H
 #define _BF_H
@@ -33,8 +44,6 @@ Author: Alex D. Breslow
 // URL: https://dl.acm.org/citation.cfm?id=1594230
 
 #include <array>
-
-#define LOG2(x) (x < 16 ? 3 : x < 32 ? 4 : x < 64 ? 5 : x < 128 ? 6 : x < 256 ? 7 : x < 512 ? 8 : -1)
 
 namespace BlockedBF{
   using slot_type = uint32_t;
@@ -51,7 +60,7 @@ namespace BlockedBF{
     inline bool contains_and_update(const hash_t item){
       constexpr slot_type one = 1;
       constexpr slot_type slot_width_bits = sizeof(slot_type) * 8;
-      constexpr slot_type log2_slot_width = LOG2(slot_width_bits);
+      constexpr slot_type log2_slot_width = util::log2ceil(slot_width_bits);
       constexpr slot_type shift0 = 0;
       constexpr slot_type shift1 = log2_slot_width;
       constexpr slot_type shift2 = log2_slot_width * 2;

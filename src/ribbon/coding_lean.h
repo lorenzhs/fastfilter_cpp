@@ -16,7 +16,7 @@
 
 #include "port.h"  // for port::kLittleEndian
 
-namespace ribbon {
+ namespace r2 {
 
 // Lower-level versions of Put... that write directly into a character buffer
 // REQUIRES: dst has enough space for the value being written
@@ -130,4 +130,4 @@ inline T EndianSwapValue(T v) {
   return ret_val;
 }
 
-}  // namespace ribbon
+}  //  namespace r2

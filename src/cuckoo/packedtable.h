@@ -1,6 +1,7 @@
 #ifndef CUCKOO_FILTER_PACKED_TABLE_H_
 #define CUCKOO_FILTER_PACKED_TABLE_H_
 
+#include <random>
 #include <sstream>
 #include <utility>
 
@@ -23,9 +24,10 @@ class PackedTable {
   size_t num_buckets_;
   char *buckets_;
   PermEncoding perm_;
+  std::mt19937 rng;
 
  public:
-  explicit PackedTable(size_t num) : num_buckets_(num) {
+  explicit PackedTable(size_t num) : num_buckets_(num), rng(std::random_device{}()) {
     // NOTE(binfan): use 7 extra bytes to avoid overrun as we
     // always read a uint64
     len_ = kBytesPerBucket * num_buckets_ + 7;
@@ -408,7 +410,7 @@ class PackedTable {
       }
     }
     if (kickout) {
-      size_t r = rand() & 3;
+      size_t r = rng() & 3;
       DPRINTF(
           DEBUG_TABLE,
           "PackedTable::InsertTagToBucket, let's kick out a random slot %zu \n",

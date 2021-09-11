@@ -4,16 +4,14 @@ Fast Filter: Fast approximate membership filter implementations (C++)
 
 This is a research library currently. It is not meant for production use.
 
-Developers might want to consider our [Header-only Xor Filter library in C](https://github.com/FastFilter/xor_singleheader/).
-
-Reference: [Xor Filters: Faster and Smaller Than Bloom and Cuckoo Filters](https://arxiv.org/abs/1912.08258), Journal of Experimental Algorithmics (to appear).
+Originally, this library was written for Xor filters. It has since been expanded to cover many different data structures. This fork extends it to consider various ribbon-based data structures, most notably [BuRR](https://github.com/lorenzhs/BuRR).
 
 
 
 ## Prerequisites
 
-- A  C++11 compiler such as GNU G++ or LLVM Clang++
-- Make
+- A  C++17 compiler such as GNU G++ or LLVM Clang++
+- Make, CMake, and Ninja
 
 Expectations:
 
@@ -28,65 +26,42 @@ on a quiet machine.
 
 
 ```
-git clone https://github.com/FastFilter/fastfilter_cpp.git
+git clone https://github.com/lorenzhs/fastfilter_cpp.git
 cd fastfilter_cpp
+git submodule update --init --recursive
 cd benchmarks
 make
-# there may be compiler warnings at this point, we compile with '-Wall'
-./bulk-insert-and-query.exe 10000000
-# collect the output (it is quite verbose)
-./bulk-insert-and-query.exe 100000000
+./ribbon-benchmark.sh
 ```
 
 Your results will depend on the hardware, on the compiler and how the system is configured. A sample output is as follows:
 
 ```
-$ ./bulk-insert-and-query.exe 10000000
-                                                    find    find    find    find    find                        optimal  wasted million
-                                     add  remove      0%     25%     50%     75%    100%        ε  bits/item  bits/item   space    keys
-
-add    cycles: 325.5/key, instructions: (303.2/key, 0.93/cycle) cache misses: 12.41/key branch misses: 1.17/key
-0.00%  cycles:  81.7/key, instructions: ( 48.0/key, 0.59/cycle) cache misses:  3.06/key branch misses: 0.00/key
-0.25%  cycles:  81.8/key, instructions: ( 48.0/key, 0.59/cycle) cache misses:  3.06/key branch misses: 0.00/key
-0.50%  cycles:  81.8/key, instructions: ( 48.0/key, 0.59/cycle) cache misses:  3.06/key branch misses: 0.00/key
-0.75%  cycles:  82.0/key, instructions: ( 48.0/key, 0.59/cycle) cache misses:  3.06/key branch misses: 0.00/key
-1.00%  cycles:  81.9/key, instructions: ( 48.0/key, 0.59/cycle) cache misses:  3.06/key branch misses: 0.00/key
-                            Xor8  106.79    0.00   25.92   25.88   25.86   25.94   25.98  0.3892%       9.84       8.01   22.9%    10.0
-
+$ ./bulk-insert-and-query.exe 1000000
+Using seed 894891901
+Using add_count = 1000000 = 1 million input items and actual_sample_size = 1000000 = 1 million queries
+                                              find    find    find    1Xadd+                        optimal   wasted million
+                                       add      0%     50%    100%    3Xfind       ε%  bits/item  bits/item   space%    keys
+                            Xor8     90.74    5.46    5.46    5.46    107.12   0.3886      9.840      8.007   22.888   1.000
+                           Xor12     88.81    8.00    7.99    7.99    112.79   0.0240     14.761     12.027   22.730   1.000
+                           Xor16     81.62    5.66    5.66    5.67     98.61   0.0015     19.681     15.999   23.011   1.000
+                        XorPlus8     93.16   15.10   15.08   14.95    138.28   0.3955      9.157      7.982   14.718   1.000
+                       XorPlus16     93.95   15.68   15.57   15.46    140.67   0.0016     17.819     15.969   11.589   1.000
 ... # many more lines omitted
 ```
-
-The `add` lines preceding the name of each algorithm gives you information regarding the construction time whereas
-the other five lines give you information regarding the queries where a given percentage of elements are present
-in the set. We use Linux performance counters to measure instructions, cache misses and branch misses.
 
 As part of the benchmark, we check the correctness of the implementation.
 
 ## Benchmarking
 
-The shell script `benchmark/benchmark.sh` runs the benchmark 3 times for the most important algorithms,
-with entry sizes of 10 million and 100 million keys.
-It is much slower than the above, because each invocation runs only one algorithm
-(to ensure running one algorithm doesn't influence benchmark results of other algorithms).
-It stores the results in the file `benchmark-results.txt`.
-To futher analyze the results, use the java tool `AnalyzeResults.java`
-from the project https://github.com/FastFilter/fastfilter_java.
-Requires GCC and Java 8.
+The shell script `benchmarks/ribbon-benchmark.sh` runs the benchmark for 1 million, 10 million, and 100 million keys.
+The benchmark is run 50 times, 5 times, and once, respectively.
+It stores the results in the files `ribbon-results-$(hostname)-{1,10,100}-raw.txt`.
 To get a low error, it is best run on a Linux machine that is not otherwise in use.
-Steps to run the tests and analyze the results:
 
-    git clone https://github.com/FastFilter/fastfilter_cpp.git
-    git clone https://github.com/FastFilter/fastfilter_java.git
-    cd fastfilter_cpp/benchmarks
-    make clean ; make
-    # this may take an hour to run
-    ./benchmark.sh
+There is also a parallel benchmark in `benchmarks/run-par.sh`. This is described [in the BuRR paper](https://arxiv.org/abs/2109.01892) in more detail.
 
-    cd ../..
-    cd fastfilter_java/fastfilter
-    mvn clean install
-    java -cp target/test-classes org.fastfilter.analysis.AnalyzeResults ../../fastfilter_cpp/benchmarks/benchmark-results.txt
-
+Quotient filter benchmarks are run separately from `benchmarks/qf-bench.sh` and `benchmarks/qf-par-bench.sh` because they require differing input sizes.
 
 ## Where is your code?
 
@@ -97,17 +72,12 @@ The filter implementations are in `src/<type>/`. Most implementations depend on 
 
 ## Credit
 
+This repository is based on https://github.com/FastFilter/fastfilter_cpp and Peter C. Dillinger's fork thereof, https://github.com/pdillinger/fastfilter_cpp/.
+
 The cuckoo filter and the benchmark are derived from https://github.com/efficient/cuckoofilter by Bin Fan et al.
 The SIMD blocked Bloom filter is from https://github.com/apache/impala (via the cuckoo filter).
 The Morton filter is from https://github.com/AMDComputeLibraries/morton_filter.
 The Counting Quotient Filter (CQF) is from https://github.com/splatlab/cqf.
-
-
-# Implementations of xor filters in other programming languages
-
-* [Go](https://github.com/FastFilter/xorfilter)
-* [Erlang](https://github.com/mpope9/exor_filter)
-* Rust: [1](https://github.com/bnclabs/xorfilter), [2](https://github.com/codri/xorfilter-rs), [3](https://github.com/Polochon-street/rustxorfilter)
-* [Java](https://github.com/FastFilter/fastfilter_java)
-* [C](https://github.com/FastFilter/xor_singleheader)
-* [Python](https://github.com/GreyDireWolf/pyxorfilter)
+Further Quotient Filter code is from https://github.com/TooBiased/lpqfilter.
+Various retrieval-based filters are from https://github.com/sekti/retrieval-test.
+The BuRR (ribbon filters) code lives at https://github.com/lorenzhs/BuRR/.

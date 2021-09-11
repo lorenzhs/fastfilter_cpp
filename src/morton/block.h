@@ -22,6 +22,17 @@ THE SOFTWARE.
 Author: Alex D. Breslow 
         Advanced Micro Devices, Inc.
         AMD Research
+
+Code Source: https://github.com/AMDComputeLibraries/morton_filter
+
+VLDB 2018 Paper: https://www.vldb.org/pvldb/vol11/p1041-breslow.pdf
+
+How To Cite:
+  Alex D. Breslow and Nuwan S. Jayasena. Morton Filters: Faster, Space-Efficient
+  Cuckoo Filters Via Biasing, Compression, and Decoupled Logical Sparsity. PVLDB,
+  11(9):1041-1055, 2018
+  DOI: https://doi.org/10.14778/3213880.3213884
+
 */
 #ifndef _BLOCK_H
 #define _BLOCK_H
@@ -402,7 +413,6 @@ struct Block{ // Assuming block size is a multiple of atom_t's size in bytes
       memcpy(source_address, &item, field_width_bytes);
     }
 
-    __attribute__((optimize("unroll-loops")))
     INLINE void add_cross_left_displace(uint64_t raw_offset_bits, 
       uint64_t field_width_bits, uint64_t index, atom_t item){
       uint64_t global_index = index * field_width_bits + raw_offset_bits;

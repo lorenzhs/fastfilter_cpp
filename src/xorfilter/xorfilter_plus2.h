@@ -2,6 +2,7 @@
 #define XOR_FILTER_PLUS_XOR_FILTER_PLUS2_H_
 
 #include <assert.h>
+#include <popcntintrin.h>
 #include <algorithm>
 
 #include "hashutil.h"
@@ -29,7 +30,7 @@ inline int mostSignificantBit(uint64_t x) {
 }
 
 inline int bitCount64(uint64_t x) {
-    return __builtin_popcountll(x);
+    return _mm_popcnt_u64(x); //__builtin_popcountll(x);
 }
 
 class Rank9 {
